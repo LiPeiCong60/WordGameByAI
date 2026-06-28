@@ -222,29 +222,6 @@ DATABASE_URL=sqlite:///./narrative_agent.db
 | `GET` | `/api/games/{game_id}/export` | 导出存档 JSON | Path: `game_id` |
 | `POST` | `/api/games/import` | 导入存档 JSON | Body: `ImportPayload` |
 
-## 功能展示
-
-当前仓库暂未提交真实截图，可在后续补充到 `docs/images/` 目录。建议截图如下：
-
-![存档工作台](./docs/images/management.png)
-
-![剧情进行页](./docs/images/play.png)
-
-![角色与库存管理](./docs/images/character-inventory.png)
-
-## 我的职责 / 个人贡献
-
-在该项目中，我负责从需求拆解到工程实现的完整开发流程：分析 AI 文字游戏在长篇叙事中的状态遗忘、设定漂移和数据不可控问题，完成 FastAPI + Vue3 + LangChain 的技术选型；设计 Game、Character、Item、InventoryRecord、WorldEvent、TurnLog 等核心数据结构；实现多 Agent 叙事流水线和结构化 Prompt 输出；完成前后端接口联调、剧情流式输出、管理台 CRUD、存档导入导出和库存强校验；同时整理项目说明、安全说明和 GitHub README，确保项目可以作为 AI 应用开发 / AI Agent 实习岗位的作品展示。
-
-## 后续优化方向
-
-- **引入 RAG 世界观检索**：将 WorldLore、历史事件和长篇回合日志接入向量检索，降低上下文过长带来的遗漏。
-- **完善 Agent 工作流编排**：将当前自研流水线升级为更标准的状态图或可观测 Agent runtime，增加 trace、重试和冲突仲裁。
-- **增加测试用例**：补充后端服务、库存校验、导入导出和 Agent 输出解析的单元测试与接口测试。
-- **优化部署方式**：增加 Dockerfile / Docker Compose，支持一键启动前端、后端和数据库。
-- **增加权限与多用户能力**：为存档、上传文件和管理操作增加用户身份、访问控制和审计日志。
-- **优化前端体验**：补充真实截图、加载状态、错误提示、移动端布局和更清晰的剧情回合可视化。
-
 ## 安全与隐私
 
 项目只提交源码和公开配置模板，不提交真实 `.env`、API Key、本地 SQLite 数据库、游戏存档、用户上传头像、虚拟环境、依赖目录和构建产物。详细说明见 [SECURITY.md](SECURITY.md)。
