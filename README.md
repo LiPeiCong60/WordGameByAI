@@ -22,7 +22,7 @@ NarrativeAgent Demo 是一个最小可运行的通用 AI 文字 RPG 引擎原型
 
 ## 技术栈
 
-后端：Python、FastAPI、SQLite、SQLModel、Pydantic、OpenAI-compatible API。
+后端：Python、FastAPI、SQLite、SQLModel、Pydantic、LangChain、OpenAI-compatible API。
 
 前端：Vue3、Vite、Vue Router、Pinia、Axios、lucide-vue-next、原生 CSS。
 
@@ -55,6 +55,8 @@ DATABASE_URL=sqlite:///./narrative_agent.db
 ```
 
 如果没有配置 API Key，系统不会崩溃。Agent 接口会返回友好错误：`LLM API key is not configured.`
+
+项目通过 `langchain-openai` 的 `ChatOpenAI` 封装调用 OpenAI-compatible Chat Completions API，`OPENAI_BASE_URL` 可指向兼容 OpenAI 协议的模型服务。
 
 ## 安全与隐私
 
