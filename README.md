@@ -1,51 +1,112 @@
-# NarrativeAgent Demo
+# WordGameByAI
 
-NarrativeAgent Demo 是一个最小可运行的通用 AI 文字 RPG 引擎原型。它不是普通聊天机器人，而是围绕世界观、角色卡、物品库存、事件和多 Agent 剧情推进建立的结构化游戏 Demo。
+一个基于 FastAPI、Vue3 和 LangChain ChatOpenAI 的 AI 文字 RPG 应用框架，用结构化数据和多 Agent 叙事流水线管理长篇互动剧情。
 
-项目说明书：[docs/项目说明书.md](docs/%E9%A1%B9%E7%9B%AE%E8%AF%B4%E6%98%8E%E4%B9%A6.md)
+[项目说明书](docs/项目说明书.md) | [安全说明](SECURITY.md)
 
-## 功能列表
+## 项目简介
 
-- 自定义游戏题材、世界类型、文风、基础规则和当前状态。
-- 内置都市恋爱、玄幻修真、丧尸末日、快穿任务、科幻远征、自定义空白模板。
-- 管理 StoryWorld 世界 / 副本，快穿题材可创建多个副本。
-- 管理 WorldLore 世界观条目，并可调用 LoreAgent 整理自然语言设定。
-- 管理主角、NPC、反派、阵营代表角色卡，支持头像上传。
-- 管理完整物品定义：装备、消耗品、关键道具、任务物品、资产、资源、载具、情报等。
-- 使用统一 InventoryRecord 管理角色、队伍、地点、阵营、世界拥有的物品。
-- 使用、装备、卸下、转移物品前强制检查数据库库存。
-- 管理世界事件、关键事件、伏笔事件、关系事件等统一 WorldEvent。
-- 通过 NPCReactionAgent、NarratorAgent、PatchAgent、CheckerAgent 推进一轮剧情。
-- 保存 TurnLog、state_patch、checker_result，并在检查通过后应用状态变更。
-- ManagementAgent 只在管理页面启用，先生成修改方案，用户确认后才写入数据库。
-- 导入 / 导出完整存档 JSON。
+WordGameByAI 面向 AI 文字游戏、互动叙事 Demo 和 AI Agent 应用原型开发场景。项目尝试解决普通 LLM 聊天式文字游戏中常见的几个问题：世界观容易漂移、角色状态难以追踪、物品库存不一致、AI 生成的修改缺少安全边界。
+
+项目把“剧情生成”拆成一套可管理的应用流程：前端提供存档、角色、物品、库存、世界观、事件和剧情推进界面；后端使用 FastAPI 提供 REST API 和流式剧情接口；数据库使用 SQLModel/SQLite 保存游戏状态；LLM 调用层基于 `langchain-openai` 的 `ChatOpenAI`，由多个职责明确的 Agent 模块完成主角行动理解、NPC 反应推演、剧情生成、状态补丁提取和一致性检查。
+
+这不是一个单纯的聊天页面，而是一个围绕“AI 叙事 + 状态管理 + 数据安全写入”设计的 AI 应用框架。
+
+## 项目亮点
+
+- **LangChain 接入大模型**：通过 `langchain-openai` 的 `ChatOpenAI` 封装 OpenAI-compatible Chat Completions API，支持普通调用和流式输出。
+- **多 Agent 角色分工流水线**：将主角行动、NPC 反应、旁白生成、状态补丁和一致性检查拆分为独立 Agent 模块，由 `game_engine.py` 统一编排。
+- **结构化 Prompt 与 JSON 输出**：Agent Prompt 明确约束输出字段，使用 `response_format={"type": "json_object"}` 获取结构化结果，便于后端解析和落库。
+- **完整的状态建模**：使用 SQLModel 建模 Game、StoryWorld、WorldLore、Character、Item、InventoryRecord、WorldEvent、TurnLog、TurnSnapshot 等核心实体。
+- **FastAPI + Vue 前后端联调**：后端提供 REST/NDJSON 流式接口，前端使用 Axios 和 fetch stream 消费接口，支持剧情推进、管理台和数据编辑。
+- **AI 写入安全控制**：ManagementAgent 只生成修改方案，用户确认后才执行；后端通过 action 白名单、字段白名单和库存强校验限制 AI 对数据的影响范围。
+
+## 功能模块
+
+| 模块 | 功能说明 |
+| --- | --- |
+| 存档管理 | 创建、编辑、删除、导入、导出游戏存档，维护题材、世界类型、文风规则和当前状态。 |
+| 模板系统 | 内置都市恋爱、玄幻修真、丧尸末日、快穿任务、科幻远征和自定义空白模板，支持自定义模板管理。 |
+| 世界/副本管理 | 维护 StoryWorld，支持任务目标、完成条件、失败条件、剧情偏移度和当前世界切换。 |
+| 世界观管理 | 管理 WorldLore 条目，并通过 LoreAgent 将自然语言设定整理为结构化世界观数据。 |
+| 角色系统 | 管理主角、NPC、反派、阵营代表等角色卡，支持头像上传和 `agent_enabled` 子 Agent 开关。 |
+| 物品与库存 | 管理物品定义和 InventoryRecord，支持使用、装备、卸下、转移等强校验操作。 |
+| 世界事件 | 维护背景事件、关键事件、伏笔事件、关系事件等 WorldEvent。 |
+| 剧情推进 | 支持开场生成、玩家行动输入、流式剧情输出、回合记录、删除后续回合和重新生成。 |
+| 管理 Agent | 通过自然语言生成存档修改方案，用户确认后执行白名单动作。 |
+| 导入导出 | 导出完整存档 JSON，导入后重建游戏、角色、物品、库存、事件和回合记录。 |
 
 ## 技术栈
 
-后端：Python、FastAPI、SQLite、SQLModel、Pydantic、LangChain、OpenAI-compatible API。
+| 类别 | 技术 |
+| --- | --- |
+| 前端 | Vue 3、Vite、Vue Router、Pinia、Axios、lucide-vue-next、原生 CSS |
+| 后端 | Python、FastAPI、SQLModel、Pydantic、Uvicorn |
+| AI / 大模型 | LangChain、langchain-openai、ChatOpenAI、OpenAI-compatible API、结构化 JSON 输出 |
+| 数据库 | SQLite，本地默认数据库文件为 `backend/narrative_agent.db` |
+| 工程工具 | npm、Python venv、`.env` 配置、`.gitignore` 隐私排除、FastAPI Swagger 文档 |
+| 运行环境 | 本地开发环境，后端默认 `localhost:8000`，前端默认 `localhost:5173` |
 
-前端：Vue3、Vite、Vue Router、Pinia、Axios、lucide-vue-next、原生 CSS。
+## 项目结构
 
-## 安装依赖
+```text
+WordGameByAI/
+├── backend/                         # FastAPI 后端服务
+│   ├── agents/                      # 各类 Agent：主角、NPC、旁白、补丁、检查、管理、设定整理
+│   ├── routers/                     # API 路由：games、characters、items、turns、management 等
+│   ├── uploads/                     # 用户上传目录，实际文件默认不提交
+│   ├── database.py                  # 数据库连接、表初始化、默认模板种子数据
+│   ├── game_engine.py               # 剧情推进编排：加载上下文、调用 Agent、保存回合和快照
+│   ├── inventory_service.py         # 库存使用、装备、卸下、转移的后端强校验
+│   ├── llm_client.py                # LangChain ChatOpenAI 调用封装
+│   ├── main.py                      # FastAPI 应用入口、CORS、静态文件、路由注册
+│   ├── management_service.py        # ManagementAgent 方案确认、白名单动作执行
+│   ├── models.py                    # SQLModel 数据模型
+│   ├── prompt_builder.py            # Agent Prompt 构造与结构化输出约束
+│   └── schemas.py                   # Pydantic 请求模型
+├── frontend/                        # Vue3 前端
+│   ├── src/
+│   │   ├── api/                     # Axios/fetch API 封装
+│   │   ├── components/              # 剧情日志、角色卡、库存面板、管理 Agent 面板等组件
+│   │   ├── router/                  # 前端路由
+│   │   ├── stores/                  # Pinia 状态管理
+│   │   ├── styles/                  # 全局样式
+│   │   ├── utils/                   # 标签、预设、初始角色等工具
+│   │   └── views/                   # 存档、游戏、模板、角色、物品、库存、世界、事件等页面
+│   ├── package.json                 # 前端依赖和脚本
+│   └── vite.config.js               # Vite 配置
+├── docs/
+│   └── 项目说明书.md                 # 更完整的项目说明文档
+├── .gitignore                       # 忽略密钥、数据库、上传文件、依赖和构建产物
+├── SECURITY.md                      # 安全与隐私说明
+├── requirements.txt                 # 后端依赖
+└── README.md
+```
+
+## 快速开始
+
+### 1. 克隆项目
 
 ```bash
-cd narrative-agent-demo
+git clone https://github.com/LiPeiCong60/WordGameByAI.git
+cd WordGameByAI
+```
+
+### 2. 安装后端依赖
+
+```bash
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-
-cd frontend
-npm install
 ```
 
-## 配置 `.env`
+### 3. 配置环境变量
 
 ```bash
-cd narrative-agent-demo/backend
-cp .env.example .env
+cp backend/.env.example backend/.env
 ```
 
-可配置：
+编辑 `backend/.env`，填入自己的模型服务配置：
 
 ```env
 OPENAI_API_KEY=your_api_key_here
@@ -54,142 +115,138 @@ OPENAI_MODEL=gpt-4o-mini
 DATABASE_URL=sqlite:///./narrative_agent.db
 ```
 
-如果没有配置 API Key，系统不会崩溃。Agent 接口会返回友好错误：`LLM API key is not configured.`
+如果不配置 API Key，系统仍可启动，但 Agent 调用会返回 `LLM API key is not configured.`。
 
-项目通过 `langchain-openai` 的 `ChatOpenAI` 封装调用 OpenAI-compatible Chat Completions API，`OPENAI_BASE_URL` 可指向兼容 OpenAI 协议的模型服务。
-
-## 安全与隐私
-
-仓库只提交源码和公开配置模板。真实 `.env`、API Key、本地 SQLite 数据库、游戏存档、剧情回合记录、用户上传头像、虚拟环境、依赖目录和构建产物都不应提交。
-
-公开配置请使用 `backend/.env.example`。本地运行时复制为 `backend/.env` 后再填入私有配置。
-
-## 启动后端
+### 4. 启动后端
 
 ```bash
-cd narrative-agent-demo/backend
+cd backend
 source ../.venv/bin/activate
 uvicorn main:app --reload --port 8000
 ```
 
-接口文档：http://localhost:8000/docs
+后端地址：
 
-## 启动前端
+- API 根路径：`http://localhost:8000/api`
+- Swagger 文档：`http://localhost:8000/docs`
+- 健康检查：`http://localhost:8000/api/health`
+
+### 5. 启动前端
+
+新开一个终端：
 
 ```bash
-cd narrative-agent-demo/frontend
+cd frontend
+npm install
 npm run dev
 ```
 
-前端默认访问：http://localhost:5173
+前端默认地址：
 
-如需修改 API 地址：
+```text
+http://localhost:5173
+```
+
+如果需要修改后端 API 地址，可以在启动时指定：
 
 ```bash
 VITE_API_BASE_URL=http://localhost:8000/api npm run dev
 ```
 
-## 创建游戏与模板
+## 环境变量说明
 
-打开游戏页，选择世界观模板。模板会填入题材、世界类型、基调、默认文风和世界规则摘要，用户仍可手动修改。都市、玄幻、快穿等题材都可以独立创建游戏。
+后端环境变量位于 `backend/.env`，仓库只提交 `backend/.env.example`。
 
-模板页可查看默认模板，也可新增、编辑、删除自定义模板。
+```env
+OPENAI_API_KEY=your_api_key_here
+OPENAI_BASE_URL=https://api.openai.com/v1
+OPENAI_MODEL=gpt-4o-mini
+DATABASE_URL=sqlite:///./narrative_agent.db
+```
 
-## 世界 / 副本
+| 变量 | 说明 | 是否必填 |
+| --- | --- | --- |
+| `OPENAI_API_KEY` | 大模型 API Key。真实密钥只放本地 `.env`，不要提交到 Git。 | 调用 Agent 时必填 |
+| `OPENAI_BASE_URL` | OpenAI-compatible API 地址，可接入兼容 OpenAI 协议的模型服务。 | 否，默认 OpenAI API |
+| `OPENAI_MODEL` | 使用的模型名称。 | 否，默认 `gpt-4o-mini` |
+| `DATABASE_URL` | SQLModel 数据库连接地址。 | 否，默认本地 SQLite |
+| `VITE_API_BASE_URL` | 前端 API 地址，运行前端时可通过环境变量传入。 | 否，默认 `http://localhost:8000/api` |
 
-在“世界”页新增 StoryWorld，填写世界类型、摘要、当前状态、任务目标、完成条件、失败条件和剧情偏移度。普通都市 / 玄幻游戏可只有一个 StoryWorld；快穿游戏可创建多个 StoryWorld，并用旗帜按钮设为当前世界。
+## API 接口说明
 
-## 世界观
+以下列出主要接口，完整参数和响应可在启动后端后访问 `http://localhost:8000/docs` 查看。
 
-在“设定”页新增 WorldLore，设置分类、canon_level、importance 和内容。LoreAgent 整理功能只返回 JSON，不自动保存；用户确认后再填入表单保存。
+| 方法 | 路径 | 功能说明 | 请求参数简述 |
+| --- | --- | --- | --- |
+| `GET` | `/api/health` | 健康检查 | 无 |
+| `POST` | `/api/games` | 创建游戏存档 | Body: `GameCreate`，可传 `template_id` |
+| `GET` | `/api/games` | 获取存档列表 | 无 |
+| `GET` | `/api/games/{game_id}` | 获取单个存档 | Path: `game_id` |
+| `PATCH` | `/api/games/{game_id}` | 更新存档信息 | Path: `game_id`，Body: `GameUpdate` |
+| `DELETE` | `/api/games/{game_id}` | 删除存档及关联数据 | Path: `game_id` |
+| `GET` | `/api/templates` | 获取模板列表 | 无 |
+| `POST` | `/api/templates` | 创建模板 | Body: `TemplateCreate` |
+| `PATCH` | `/api/templates/{template_id}` | 更新模板 | Path: `template_id`，Body: `TemplateUpdate` |
+| `DELETE` | `/api/templates/{template_id}` | 删除模板 | Path: `template_id` |
+| `POST` | `/api/games/{game_id}/story-worlds` | 创建世界/副本 | Path: `game_id`，Body: `StoryWorldCreate` |
+| `GET` | `/api/games/{game_id}/story-worlds` | 获取世界/副本列表 | Path: `game_id` |
+| `POST` | `/api/games/{game_id}/story-worlds/{world_id}/set-current` | 设置当前世界 | Path: `game_id`, `world_id` |
+| `POST` | `/api/games/{game_id}/lore` | 创建世界观条目 | Path: `game_id`，Body: `LoreCreate` |
+| `GET` | `/api/games/{game_id}/lore` | 获取世界观列表 | Path: `game_id` |
+| `POST` | `/api/games/{game_id}/lore/organize` | 使用 LoreAgent 整理设定 | Path: `game_id`，Body: `{ text }` |
+| `POST` | `/api/games/{game_id}/characters` | 创建角色 | Path: `game_id`，Body: `CharacterCreate` |
+| `GET` | `/api/games/{game_id}/characters` | 获取角色列表 | Path: `game_id` |
+| `POST` | `/api/characters/{character_id}/avatar` | 上传角色头像 | FormData: `file` |
+| `POST` | `/api/games/{game_id}/items` | 创建物品 | Path: `game_id`，Body: `ItemCreate` |
+| `GET` | `/api/games/{game_id}/items` | 获取物品列表 | Path: `game_id` |
+| `POST` | `/api/games/{game_id}/inventory` | 创建库存记录 | Path: `game_id`，Body: `InventoryCreate` |
+| `GET` | `/api/games/{game_id}/inventory` | 获取库存列表 | Path: `game_id` |
+| `POST` | `/api/inventory/use` | 使用物品 | Body: `UseItemRequest` |
+| `POST` | `/api/inventory/equip` | 装备物品 | Body: `EquipItemRequest` |
+| `POST` | `/api/inventory/unequip` | 卸下物品 | Body: `EquipItemRequest` |
+| `POST` | `/api/inventory/transfer` | 转移物品 | Body: `TransferRequest` |
+| `POST` | `/api/games/{game_id}/events` | 创建世界事件 | Path: `game_id`，Body: `EventCreate` |
+| `GET` | `/api/games/{game_id}/events` | 获取世界事件列表 | Path: `game_id` |
+| `POST` | `/api/games/{game_id}/opening` | 生成开场白 | Path: `game_id` |
+| `POST` | `/api/games/{game_id}/opening/stream` | 流式生成开场白 | Path: `game_id`，返回 NDJSON |
+| `POST` | `/api/games/{game_id}/turn` | 推进一轮剧情 | Path: `game_id`，Body: `{ user_input }` |
+| `POST` | `/api/games/{game_id}/turn/stream` | 流式推进剧情 | Path: `game_id`，Body: `{ user_input }`，返回 NDJSON |
+| `DELETE` | `/api/turns/{turn_id}/from-here` | 删除该回合及之后剧情 | Path: `turn_id` |
+| `POST` | `/api/turns/{turn_id}/regenerate` | 重新生成指定回合 | Path: `turn_id` |
+| `POST` | `/api/turns/{turn_id}/regenerate/stream` | 流式重新生成指定回合 | Path: `turn_id`，返回 NDJSON |
+| `POST` | `/api/games/{game_id}/management/sessions` | 创建管理会话 | Path: `game_id`，Body: `ManagementSessionCreate` |
+| `GET` | `/api/games/{game_id}/management/sessions` | 获取管理会话列表 | Path: `game_id` |
+| `POST` | `/api/management/sessions/{session_id}/chat` | 发送管理 Agent 消息 | Path: `session_id`，Body: `{ message, scope }` |
+| `POST` | `/api/management/proposals/{proposal_id}/apply` | 确认执行修改方案 | Path: `proposal_id` |
+| `POST` | `/api/management/proposals/{proposal_id}/reject` | 拒绝修改方案 | Path: `proposal_id` |
+| `GET` | `/api/games/{game_id}/export` | 导出存档 JSON | Path: `game_id` |
+| `POST` | `/api/games/import` | 导入存档 JSON | Body: `ImportPayload` |
 
-## 角色与头像
+## 功能展示
 
-在“角色”页新增主角或 NPC。角色卡字段包括头像、姓名、角色类型、性别、年龄、身份 / 种族、外貌、性格、说话风格、能力、状态、心情、位置、与主角关系、关系值、目标、隐藏目标、记忆摘要、agent_enabled 和 extra_attrs JSON。
+当前仓库暂未提交真实截图，可在后续补充到 `docs/images/` 目录。建议截图如下：
 
-保存角色后可以上传头像。头像会保存到 `backend/uploads/characters/`，数据库保存 `avatar_url`，FastAPI 通过 `/uploads` 提供静态访问。
+![存档工作台](./docs/images/management.png)
 
-## 物品与库存
+![剧情进行页](./docs/images/play.png)
 
-在“物品”页新增物品，设置 item_type、状态、稀有度、堆叠上限、可装备、可消耗、关键物品、可交易、唯一、使用条件、效果说明、位置、重要度和 extra_attrs。
+![角色与库存管理](./docs/images/character-inventory.png)
 
-物品定义只放在 Item 表。具体归属、数量、装备状态、存放位置和物品当前状态都放在 InventoryRecord 表。
+## 我的职责 / 个人贡献
 
-可在“物品”页将物品分配给角色、队伍、地点、阵营或世界，也可在“库存”页直接创建库存记录。
+在该项目中，我负责从需求拆解到工程实现的完整开发流程：分析 AI 文字游戏在长篇叙事中的状态遗忘、设定漂移和数据不可控问题，完成 FastAPI + Vue3 + LangChain 的技术选型；设计 Game、Character、Item、InventoryRecord、WorldEvent、TurnLog 等核心数据结构；实现多 Agent 叙事流水线和结构化 Prompt 输出；完成前后端接口联调、剧情流式输出、管理台 CRUD、存档导入导出和库存强校验；同时整理项目说明、安全说明和 GitHub README，确保项目可以作为 AI 应用开发 / AI Agent 实习岗位的作品展示。
 
-## 使用、装备、卸下、转移物品
+## 后续优化方向
 
-“库存”页的操作会调用后端 inventory_service：
+- **引入 RAG 世界观检索**：将 WorldLore、历史事件和长篇回合日志接入向量检索，降低上下文过长带来的遗漏。
+- **完善 Agent 工作流编排**：将当前自研流水线升级为更标准的状态图或可观测 Agent runtime，增加 trace、重试和冲突仲裁。
+- **增加测试用例**：补充后端服务、库存校验、导入导出和 Agent 输出解析的单元测试与接口测试。
+- **优化部署方式**：增加 Dockerfile / Docker Compose，支持一键启动前端、后端和数据库。
+- **增加权限与多用户能力**：为存档、上传文件和管理操作增加用户身份、访问控制和审计日志。
+- **优化前端体验**：补充真实截图、加载状态、错误提示、移动端布局和更清晰的剧情回合可视化。
 
-- 主角或 NPC 没有库存记录时不能使用该物品。
-- 数量不足时拒绝使用或转移。
-- lost、broken、consumed 状态不能正常使用。
-- 消耗品使用成功后扣数量。
-- 非消耗品默认不减少数量。
-- 关键物品默认不能普通消耗，除非 extra_attrs 或 usable_condition 明确允许。
-- 装备物品前必须确认角色拥有该物品。
-- 转移物品前必须确认来源拥有者有足够数量。
+## 安全与隐私
 
-## 世界事件
+项目只提交源码和公开配置模板，不提交真实 `.env`、API Key、本地 SQLite 数据库、游戏存档、用户上传头像、虚拟环境、依赖目录和构建产物。详细说明见 [SECURITY.md](SECURITY.md)。
 
-在“事件”页新增 WorldEvent，设置事件类型、arc_name、related_world、摘要、地点、参与者、后果、状态、重要度和 extra_attrs。
-
-## 剧情推进
-
-在“进行”页输入玩家行动。后端执行：
-
-1. 读取 Game、当前 StoryWorld、WorldLore、主角、NPC、Item、InventoryRecord、WorldEvent、最近 TurnLog。
-2. 调用 NPCReactionAgent 推演 NPC 反应。
-3. 调用 NarratorAgent 生成可见剧情。
-4. 调用 PatchAgent 提取 state_patch。
-5. 调用 CheckerAgent 检查连续性和库存合法性。
-6. 检查通过则调用 PatchApplier 写入状态。
-7. 保存 TurnLog 并返回剧情、NPC 反应、state_patch 和 checker_result。
-
-第一版文本输入中的“我使用某物品”主要由 CheckerAgent 拦截；强校验使用请通过库存页的“使用”按钮。
-
-## ManagementAgent
-
-ManagementAgent 只在“管理”页工作，不参与普通剧情生成。它读取当前游戏上下文，和用户讨论要修改的世界观、角色、物品、库存、事件或当前状态，然后生成 proposed_actions。
-
-修改方案会保存为 ManagementProposal，状态为 `pending_confirmation`。用户点击“确认执行”后，后端才会执行方案。执行时只允许白名单 action，禁止任意 SQL、删除数据库、绕过库存校验、绕过关键物品保护、修改 API Key 或系统配置。
-
-支持的 action：
-
-`update_game`、`create_story_world`、`update_story_world`、`create_lore`、`update_lore`、`create_character`、`update_character`、`create_item`、`update_item`、`create_inventory_record`、`update_inventory_record`、`transfer_item`、`use_item`、`equip_item`、`unequip_item`、`create_event`、`update_event`。
-
-## 导入 / 导出存档
-
-游戏页可导出完整 JSON，包含：
-
-- game
-- story_worlds
-- world_lore
-- characters
-- items
-- inventory_records
-- world_events
-- turn_logs
-- management_sessions
-- management_proposals
-
-导入时会创建新的 Game，并重建世界、角色、物品和库存关系。
-
-## 当前 Demo 限制
-
-- Agent 是同步函数调用，没有队列、缓存或流式输出。
-- 文本输入中的物品使用意图没有完整自然语言解析。
-- CheckerAgent 依赖 LLM；没有 API Key 时只返回友好错误，不进行真实语义检查。
-- 前端是 MVP 管理台，偏向完整数据管理而非最终游戏 UI。
-- SQLite 适合本地 Demo，多用户并发需要替换数据库和权限系统。
-
-## 后续扩展方向
-
-- RAG 世界观检索。
-- PostgreSQL / pgvector。
-- 存档版本化和回档。
-- 文风润色 Agent。
-- 更强的规则引擎和一致性检查。
-- 阵营 Agent、地点 Agent、任务 Agent。
-- 文本输入前置意图解析和库存预校验。
-- 流式剧情生成与长篇记忆压缩。
+如果密钥曾被误提交，应立即在对应平台轮换密钥，并在公开仓库前清理 Git 历史。
