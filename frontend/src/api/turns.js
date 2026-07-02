@@ -1,6 +1,11 @@
 import { API_BASE_URL, apiDelete, apiPost } from './http'
 
-export const runTurn = (gameId, userInput) => apiPost(`/games/${gameId}/turn`, { user_input: userInput })
+function buildTurnPayload(input, options = {}) {
+  const base = typeof input === 'object' && input !== null ? input : { user_input: input }
+  return { ...base, ...options }
+}
+
+export const runTurn = (gameId, input, options = {}) => apiPost(`/games/${gameId}/turn`, buildTurnPayload(input, options))
 export const runOpening = (gameId) => apiPost(`/games/${gameId}/opening`)
 export const deleteTurnsFrom = (turnId) => apiDelete(`/turns/${turnId}/from-here`)
 export const regenerateTurn = (turnId) => apiPost(`/turns/${turnId}/regenerate`)
@@ -30,11 +35,11 @@ async function consumeNdjsonStream(response, onEvent) {
   if (buffer.trim()) onEvent(JSON.parse(buffer))
 }
 
-export async function runTurnStream(gameId, userInput, onEvent) {
+export async function runTurnStream(gameId, input, onEvent, options = {}) {
   const response = await fetch(`${API_BASE_URL}/games/${gameId}/turn/stream`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ user_input: userInput })
+    body: JSON.stringify(buildTurnPayload(input, options))
   })
   return consumeNdjsonStream(response, onEvent)
 }

@@ -9,6 +9,7 @@ from models import (
     Item,
     ManagementProposal,
     ManagementSession,
+    RagMemory,
     StoryWorld,
     TurnLog,
     WorldEvent,
@@ -33,6 +34,7 @@ def export_game(game_id: int, db: Session) -> dict:
         "inventory_records": [_dump(x) for x in db.exec(select(InventoryRecord).where(InventoryRecord.game_id == game_id)).all()],
         "world_events": [_dump(x) for x in db.exec(select(WorldEvent).where(WorldEvent.game_id == game_id)).all()],
         "turn_logs": [_dump(x) for x in db.exec(select(TurnLog).where(TurnLog.game_id == game_id)).all()],
+        "rag_memories": [_dump(x) for x in db.exec(select(RagMemory).where(RagMemory.game_id == game_id)).all()],
         "management_sessions": [_dump(x) for x in db.exec(select(ManagementSession).where(ManagementSession.game_id == game_id)).all()],
         "management_proposals": [_dump(x) for x in db.exec(select(ManagementProposal).where(ManagementProposal.game_id == game_id)).all()],
     }
@@ -109,6 +111,10 @@ def import_game(payload: dict, db: Session) -> Game:
 
     for row in payload.get("turn_logs", []):
         db.add(TurnLog(**_strip_system_fields(row), game_id=game.id))
+    db.commit()
+
+    for row in payload.get("rag_memories", []):
+        db.add(RagMemory(**_strip_system_fields(row), game_id=game.id))
     db.commit()
 
     for row in payload.get("management_sessions", []):

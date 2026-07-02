@@ -6,6 +6,7 @@ from sqlmodel import Session, select
 
 from json_utils import dump_json_field, merge_json_field, parse_json_field
 from models import Character, Game, InventoryRecord, Item, StoryWorld, WorldEvent
+from numeric_utils import as_int
 
 
 def _touch(record) -> None:
@@ -29,10 +30,7 @@ def _truthy(value, default: bool = False) -> bool:
 
 
 def _as_int(value, default: int = 0) -> int:
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return default
+    return as_int(value, default)
 
 
 def _looks_ambient_name(name: str) -> bool:
@@ -151,7 +149,7 @@ def apply_state_patch(game_id: int, state_patch: dict, db: Session) -> dict:
                     participants=event.get("participants", ""),
                     consequence=event.get("consequence", ""),
                     status=event.get("status", "active"),
-                    importance=event.get("importance", 5),
+                    importance=_as_int(event.get("importance"), 5),
                     extra_attrs=event.get("extra_attrs", "{}"),
                 )
             )
@@ -230,13 +228,14 @@ def apply_state_patch(game_id: int, state_patch: dict, db: Session) -> dict:
             "status",
             "mood",
             "relationship_to_player",
-            "relationship_score",
             "current_goal",
             "current_location",
             "memory_summary",
         ]:
             if key in item:
                 setattr(character, key, item[key])
+        if "relationship_score" in item:
+            character.relationship_score = _as_int(item.get("relationship_score"), character.relationship_score)
         if "extra_attrs" in item:
             character.extra_attrs = merge_json_field(character.extra_attrs, item["extra_attrs"])
         _touch(character)
@@ -285,9 +284,11 @@ def apply_state_patch(game_id: int, state_patch: dict, db: Session) -> dict:
         if not item:
             warnings.append(f"找不到物品，未应用更新: {name}")
             continue
-        for key in ["status", "current_location", "importance"]:
+        for key in ["status", "current_location"]:
             if key in item_patch:
                 setattr(item, key, item_patch[key])
+        if "importance" in item_patch:
+            item.importance = _as_int(item_patch.get("importance"), item.importance)
         if "extra_attrs" in item_patch:
             item.extra_attrs = merge_json_field(item.extra_attrs, item_patch["extra_attrs"])
         _touch(item)
@@ -311,10 +312,11 @@ def apply_state_patch(game_id: int, state_patch: dict, db: Session) -> dict:
                 "mission_objective",
                 "completion_condition",
                 "failure_condition",
-                "plot_deviation",
             ]:
                 if key in story_world_patch:
                     setattr(world, key, story_world_patch[key])
+            if "plot_deviation" in story_world_patch:
+                world.plot_deviation = _as_int(story_world_patch.get("plot_deviation"), world.plot_deviation)
             _touch(world)
             db.add(world)
         else:

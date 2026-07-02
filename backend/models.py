@@ -141,6 +141,19 @@ class WorldEvent(TimestampMixin, table=True):
     extra_attrs: str = Field(default="{}", sa_column=Column(Text))
 
 
+class RagMemory(TimestampMixin, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    game_id: int = Field(index=True)
+    source_type: str = Field(index=True)
+    source_id: Optional[int] = Field(default=None, index=True)
+    title: str = ""
+    content: str = Field(default="", sa_column=Column(Text))
+    tags: str = ""
+    importance: int = 5
+    embedding_json: str = Field(default="{}", sa_column=Column(Text))
+    extra_attrs: str = Field(default="{}", sa_column=Column(Text))
+
+
 class TurnLog(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     game_id: int = Field(index=True)

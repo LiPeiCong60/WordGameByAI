@@ -7,7 +7,8 @@ from typing import Iterator
 from dotenv import load_dotenv
 from sqlmodel import Session, SQLModel, create_engine, select
 
-from models import WorldTemplate
+from models import Character, Item, StoryWorld, WorldEvent, WorldTemplate
+from numeric_utils import as_int
 
 load_dotenv()
 
@@ -272,7 +273,27 @@ def seed_default_templates(session: Session) -> None:
     session.commit()
 
 
+def normalize_numeric_fields(session: Session) -> None:
+    targets = [
+        (WorldEvent, "importance", 5),
+        (Item, "importance", 5),
+        (Character, "relationship_score", 0),
+        (StoryWorld, "plot_deviation", 0),
+    ]
+    changed = False
+    for model, field, default in targets:
+        for record in session.exec(select(model)).all():
+            value = getattr(record, field, default)
+            if not isinstance(value, int):
+                setattr(record, field, as_int(value, default))
+                session.add(record)
+                changed = True
+    if changed:
+        session.commit()
+
+
 def init_db() -> None:
     SQLModel.metadata.create_all(engine)
     with Session(engine) as session:
         seed_default_templates(session)
+        normalize_numeric_fields(session)

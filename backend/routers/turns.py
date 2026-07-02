@@ -18,7 +18,7 @@ router = APIRouter()
 @router.post("/games/{game_id}/turn")
 def create_turn(game_id: int, payload: TurnRequest, db: Session = Depends(get_session)):
     try:
-        return run_game_turn(game_id, payload.user_input, db)
+        return run_game_turn(game_id, payload.effective_user_input(), db, fast_mode=payload.fast_mode)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
@@ -36,7 +36,7 @@ def _stream_json_events(events):
 @router.post("/games/{game_id}/turn/stream")
 def create_turn_stream(game_id: int, payload: TurnRequest, db: Session = Depends(get_session)):
     return StreamingResponse(
-        _stream_json_events(run_game_turn_stream(game_id, payload.user_input, db)),
+        _stream_json_events(run_game_turn_stream(game_id, payload.effective_user_input(), db, fast_mode=payload.fast_mode)),
         media_type="application/x-ndjson",
     )
 

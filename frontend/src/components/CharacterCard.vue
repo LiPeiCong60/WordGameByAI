@@ -1,6 +1,7 @@
 <template>
   <article class="character-card">
-    <img class="avatar" :src="avatarSrc" :alt="character.name" />
+    <img v-if="avatarSrc" class="avatar" :src="avatarSrc" :alt="character.name" @error="imageFailed = true" />
+    <div v-else class="avatar-fallback" aria-hidden="true">{{ initials }}</div>
     <div class="card-body">
       <header>
         <h3>{{ character.name || '未命名角色' }}</h3>
@@ -18,13 +19,25 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { characterStatusLabels, labelFor, roleTypeLabels } from '../utils/labels'
 
 const props = defineProps({
   character: { type: Object, required: true }
 })
 
-const apiBase = (import.meta.env.VITE_API_ORIGIN || 'http://localhost:8000').replace(/\/api$/, '')
-const avatarSrc = computed(() => props.character.avatar_url ? `${apiBase}${props.character.avatar_url}` : `${apiBase}/uploads/characters/placeholder.png`)
+const imageFailed = ref(false)
+const apiBase = (import.meta.env.VITE_API_ORIGIN || import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api').replace(/\/api$/, '')
+const avatarSrc = computed(() => {
+  if (imageFailed.value || !props.character.avatar_url) return ''
+  return `${apiBase}${props.character.avatar_url}`
+})
+const initials = computed(() => String(props.character.name || '?').slice(0, 1))
+
+watch(
+  () => props.character.avatar_url,
+  () => {
+    imageFailed.value = false
+  }
+)
 </script>

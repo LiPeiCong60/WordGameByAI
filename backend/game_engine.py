@@ -7,11 +7,12 @@ from agents.narrator_agent import run_narrator_agent, run_narrator_stream_agent
 from agents.npc_reaction_agent import run_npc_reaction_agent
 from agents.opening_agent import run_opening_agent, run_opening_stream_agent
 from agents.patch_agent import run_patch_agent
-from agents.protagonist_agent import run_protagonist_agent
+from agents.protagonist_agent import run_protagonist_agent, run_protagonist_fallback
 from export_import import export_game
 from json_utils import dump_json_field
 from models import Character, Game, InventoryRecord, Item, StoryWorld, TurnLog, TurnSnapshot, WorldEvent, WorldLore, WorldTemplate
 from patch_applier import apply_state_patch
+from rag_service import attach_retrieved_memories, store_turn_memory
 
 
 def _model_dump(record) -> dict:
@@ -122,6 +123,15 @@ def _save_opening_turn(game_id: int, visible_story: str, snapshot_before_turn: d
         snapshot_before_turn=snapshot_before_turn,
         session=session,
     )
+    rag_memory = store_turn_memory(
+        game_id,
+        turn,
+        visible_story,
+        {"reactions": [], "opening": True},
+        state_patch,
+        checker_result,
+        session,
+    )
     return {
         "visible_story": visible_story,
         "npc_reactions": {"reactions": [], "opening": True},
@@ -129,13 +139,19 @@ def _save_opening_turn(game_id: int, visible_story: str, snapshot_before_turn: d
         "checker_result": checker_result,
         "apply_result": apply_result,
         "turn_id": turn.id,
+        "rag_memory_id": rag_memory.id if rag_memory else None,
     }
 
 
 def run_opening_turn(game_id: int, session: Session) -> dict:
     if _has_turn_logs(game_id, session):
         return {"ok": True, "skipped": True, "message": "当前存档已经有剧情记录，不重复生成开场白。"}
-    context = load_game_context(game_id, session)
+    base_context = load_game_context(game_id, session)
+    query = " ".join(
+        str(base_context.get("game", {}).get(key) or "")
+        for key in ["title", "genre", "world_type", "tone", "rules_summary"]
+    )
+    context = attach_retrieved_memories(base_context, game_id, query or "开场", session)
     snapshot_before_turn = export_game(game_id, session)
     story = run_opening_agent(context)
     visible_story = str(story.get("visible_story") or "").strip() or "开场白生成失败：模型没有返回内容。"
@@ -148,9 +164,15 @@ def run_opening_turn_stream(game_id: int, session: Session):
         yield {"type": "done", "skipped": True, "visible_story": "", "message": "当前存档已经有剧情记录，不重复生成开场白。"}
         return
 
-    context = load_game_context(game_id, session)
+    base_context = load_game_context(game_id, session)
+    query = " ".join(
+        str(base_context.get("game", {}).get(key) or "")
+        for key in ["title", "genre", "world_type", "tone", "rules_summary"]
+    )
+    context = attach_retrieved_memories(base_context, game_id, query or "开场", session)
     snapshot_before_turn = export_game(game_id, session)
 
+    yield {"type": "status", "message": "正在检索相关世界观和角色记忆..."}
     yield {"type": "status", "message": "正在结合模板生成开场白..."}
     chunks: list[str] = []
     for chunk in run_opening_stream_agent(context):
@@ -165,13 +187,17 @@ def run_opening_turn_stream(game_id: int, session: Session):
     yield {"type": "done", "skipped": False, **result}
 
 
-def run_game_turn(game_id: int, user_input: str, session: Session) -> dict:
-    context = load_game_context(game_id, session)
+def run_game_turn(game_id: int, user_input: str, session: Session, fast_mode: bool = False) -> dict:
+    context = attach_retrieved_memories(load_game_context(game_id, session), game_id, user_input, session)
     existing_turns = session.exec(select(TurnLog).where(TurnLog.game_id == game_id)).all()
     turn_number = len(existing_turns) + 1
     snapshot_before_turn = export_game(game_id, session)
-    protagonist_turn = run_protagonist_agent(context, user_input)
-    npc_reactions = run_npc_reaction_agent(context, user_input, protagonist_turn)
+    protagonist_turn = run_protagonist_fallback(context, user_input) if fast_mode else run_protagonist_agent(context, user_input)
+    npc_reactions = (
+        {"reactions": [], "selected_npcs": [], "omitted_npcs": [], "selection_reason": "快速模式跳过 NPC 独立反应推演。"}
+        if fast_mode
+        else run_npc_reaction_agent(context, user_input, protagonist_turn)
+    )
     npc_reactions = {**npc_reactions, "protagonist_turn": protagonist_turn}
     story = run_narrator_agent(context, user_input, protagonist_turn, npc_reactions)
     visible_story = _compose_visible_story(protagonist_turn, story.get("visible_story", ""))
@@ -193,6 +219,7 @@ def run_game_turn(game_id: int, user_input: str, session: Session) -> dict:
         snapshot_before_turn=snapshot_before_turn,
         session=session,
     )
+    rag_memory = store_turn_memory(game_id, turn, visible_story, npc_reactions, state_patch, checker_result, session)
 
     return {
         "visible_story": visible_story,
@@ -201,17 +228,25 @@ def run_game_turn(game_id: int, user_input: str, session: Session) -> dict:
         "checker_result": checker_result,
         "apply_result": apply_result,
         "turn_id": turn.id,
+        "retrieved_memories": context.get("retrieved_memories", []),
+        "rag_memory_id": rag_memory.id if rag_memory else None,
+        "fast_mode": fast_mode,
     }
 
 
-def run_game_turn_stream(game_id: int, user_input: str, session: Session):
-    context = load_game_context(game_id, session)
+def run_game_turn_stream(game_id: int, user_input: str, session: Session, fast_mode: bool = False):
+    yield {"type": "status", "message": "正在检索相关世界观和角色记忆..."}
+    context = attach_retrieved_memories(load_game_context(game_id, session), game_id, user_input, session)
     existing_turns = session.exec(select(TurnLog).where(TurnLog.game_id == game_id)).all()
     turn_number = len(existing_turns) + 1
     snapshot_before_turn = export_game(game_id, session)
 
-    yield {"type": "status", "message": "正在推演主角行动..."}
-    protagonist_turn = run_protagonist_agent(context, user_input)
+    if fast_mode:
+        yield {"type": "status", "message": "快速模式：正在整理玩家行动..."}
+        protagonist_turn = run_protagonist_fallback(context, user_input)
+    else:
+        yield {"type": "status", "message": "正在推演主角行动..."}
+        protagonist_turn = run_protagonist_agent(context, user_input)
     protagonist_story = _protagonist_visible_story(protagonist_turn)
     chunks: list[str] = []
     if protagonist_story:
@@ -219,8 +254,16 @@ def run_game_turn_stream(game_id: int, user_input: str, session: Session):
         chunks.append(first_chunk)
         yield {"type": "delta", "text": first_chunk}
 
-    yield {"type": "status", "message": "正在推演 NPC 反应..."}
-    npc_reactions = run_npc_reaction_agent(context, user_input, protagonist_turn)
+    if fast_mode:
+        npc_reactions = {
+            "reactions": [],
+            "selected_npcs": [],
+            "omitted_npcs": [],
+            "selection_reason": "快速模式跳过 NPC 独立反应推演。",
+        }
+    else:
+        yield {"type": "status", "message": "正在推演 NPC 反应..."}
+        npc_reactions = run_npc_reaction_agent(context, user_input, protagonist_turn)
     npc_reactions = {**npc_reactions, "protagonist_turn": protagonist_turn}
 
     yield {"type": "status", "message": "正在生成剧情..."}
@@ -249,6 +292,7 @@ def run_game_turn_stream(game_id: int, user_input: str, session: Session):
         snapshot_before_turn=snapshot_before_turn,
         session=session,
     )
+    rag_memory = store_turn_memory(game_id, turn, visible_story, npc_reactions, state_patch, checker_result, session)
 
     yield {
         "type": "done",
@@ -258,4 +302,7 @@ def run_game_turn_stream(game_id: int, user_input: str, session: Session):
         "checker_result": checker_result,
         "apply_result": apply_result,
         "turn_id": turn.id,
+        "retrieved_memories": context.get("retrieved_memories", []),
+        "rag_memory_id": rag_memory.id if rag_memory else None,
+        "fast_mode": fast_mode,
     }

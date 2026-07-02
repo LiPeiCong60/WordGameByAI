@@ -9,7 +9,7 @@ from sqlmodel import Session
 
 from database import engine, init_db
 from game_delete_service import delete_orphaned_game_records
-from routers import characters, events, games, inventory, items, lore, management, saves, story_worlds, templates, turns
+from routers import characters, events, games, inventory, items, lore, management, rag, saves, story_worlds, templates, turns
 
 BASE_DIR = Path(__file__).resolve().parent
 UPLOAD_DIR = BASE_DIR / "uploads"
@@ -38,6 +38,7 @@ app.include_router(inventory.router, prefix="/api", tags=["inventory"])
 app.include_router(events.router, prefix="/api", tags=["events"])
 app.include_router(turns.router, prefix="/api", tags=["turns"])
 app.include_router(management.router, prefix="/api", tags=["management"])
+app.include_router(rag.router, prefix="/api", tags=["rag"])
 app.include_router(saves.router, prefix="/api", tags=["saves"])
 
 

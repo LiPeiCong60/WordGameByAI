@@ -34,6 +34,26 @@
             聊天框
           </button>
         </div>
+        <div class="mode-switch speed-switch" role="tablist" aria-label="生成速度">
+          <button
+            type="button"
+            :class="{ active: generationMode === 'fast' }"
+            title="快速模式：跳过前置主角/NPC 独立推演，更快开始流式生成"
+            @click="setGenerationMode('fast')"
+          >
+            <Zap :size="15" />
+            快速
+          </button>
+          <button
+            type="button"
+            :class="{ active: generationMode === 'full' }"
+            title="精细模式：完整执行主角 Agent 和 NPC Agent，质量更稳但更慢"
+            @click="setGenerationMode('full')"
+          >
+            <SlidersHorizontal :size="15" />
+            精细
+          </button>
+        </div>
       </div>
       <StoryLog
         :entries="turnLogs"
@@ -46,8 +66,31 @@
       />
       <div v-if="streamStatus" class="stream-status">{{ streamStatus }}</div>
       <form class="turn-box" @submit.prevent="submitTurn">
-        <textarea v-model="userInput" rows="4" placeholder="输入玩家行动" :disabled="isStreaming" />
-        <button type="submit" class="primary" :disabled="isStreaming">
+        <div class="turn-input-grid">
+          <label class="turn-field">
+            <span>行动 / 背景 / 希望响应</span>
+            <textarea
+              v-model="actionInput"
+              rows="3"
+              placeholder="例如：带杯热可可下楼，观察她的反应，希望气氛自然一点"
+              :disabled="isStreaming"
+            />
+          </label>
+          <label class="turn-field">
+            <span>角色说的话</span>
+            <textarea
+              v-model="dialogueInput"
+              rows="2"
+              placeholder="例如：今天怎么想起我了，大忙人"
+              :disabled="isStreaming"
+            />
+          </label>
+        </div>
+        <label class="turn-option">
+          <input v-model="autoCompleteBlank" type="checkbox" :disabled="isStreaming" />
+          <span>空白项交给系统根据上下文补全</span>
+        </label>
+        <button type="submit" class="primary" :disabled="isStreaming || !canSubmitTurn">
           <Send :size="17" />
           {{ isStreaming ? '生成中...' : '推进剧情' }}
         </button>
@@ -89,16 +132,16 @@
       <div class="right-rail-scroll">
         <NpcStatusPanel :npcs="npcs" collapsible />
         <InventoryPanel title="队伍公共物资" :records="partyInventory" :items="items" collapsible />
-        <details class="panel collapsible-panel" open>
-          <summary class="panel-header collapsible-summary">
+        <section class="panel collapsible-panel" :class="{ open: eventPanelOpen }">
+          <button type="button" class="panel-header collapsible-summary" :aria-expanded="eventPanelOpen" @click="eventPanelOpen = !eventPanelOpen">
             <h2>重要事件</h2>
             <span>{{ events.slice(0, 5).length }}</span>
-            <ChevronDown class="collapsible-icon" :size="17" />
-          </summary>
-          <div class="collapsible-content">
+            <ChevronDown class="collapsible-icon" :class="{ open: eventPanelOpen }" :size="17" />
+          </button>
+          <div v-show="eventPanelOpen" class="collapsible-content">
             <EventList :events="events.slice(0, 5)" />
           </div>
-        </details>
+        </section>
       </div>
     </aside>
   </section>
@@ -107,7 +150,7 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
-import { BookOpen, ChevronDown, Clock3, Globe2, MapPin, MessageSquare, RefreshCw, Send } from 'lucide-vue-next'
+import { BookOpen, ChevronDown, Clock3, Globe2, MapPin, MessageSquare, RefreshCw, Send, SlidersHorizontal, Zap } from 'lucide-vue-next'
 import CharacterCard from '../components/CharacterCard.vue'
 import EventList from '../components/EventList.vue'
 import InventoryPanel from '../components/InventoryPanel.vue'
@@ -134,17 +177,22 @@ const inventory = ref([])
 const events = ref([])
 const turnLogs = ref([])
 const latestTurn = ref(null)
-const userInput = ref('')
+const actionInput = ref('')
+const dialogueInput = ref('')
+const autoCompleteBlank = ref(localStorage.getItem('autoCompleteTurnBlank') !== 'false')
 const isStreaming = ref(false)
 const streamStatus = ref('')
 const storyMode = ref(localStorage.getItem('storyDisplayMode') || 'chat')
+const generationMode = ref(localStorage.getItem('generationMode') || 'fast')
 const rightRailWidth = ref(Number(localStorage.getItem('playRightRailWidth')) || 460)
+const eventPanelOpen = ref(true)
 
 const protagonist = computed(() => characters.value.find((item) => item.role_type === 'protagonist'))
 const npcs = computed(() => characters.value.filter((item) => item.role_type !== 'protagonist'))
 const protagonistInventory = computed(() => inventory.value.filter((row) => row.owner_type === 'character' && row.owner_id === protagonist.value?.id))
 const partyInventory = computed(() => inventory.value.filter((row) => row.owner_type === 'party'))
 const checkerIssues = computed(() => latestTurn.value?.checker_result?.issues || [])
+const canSubmitTurn = computed(() => Boolean(actionInput.value.trim() || dialogueInput.value.trim()))
 const sceneTime = computed(() => {
   const value = extractLabeledValue([gameStore.currentGame?.current_state, gameStore.currentWorld?.current_status], ['当前时间', '时间', '日期'])
   return value || '未记录'
@@ -188,6 +236,11 @@ async function loadAll(options = {}) {
 function setStoryMode(mode) {
   storyMode.value = mode
   localStorage.setItem('storyDisplayMode', mode)
+}
+
+function setGenerationMode(mode) {
+  generationMode.value = mode
+  localStorage.setItem('generationMode', mode)
 }
 
 function extractLabeledValue(sources, labels) {
@@ -244,10 +297,31 @@ function clampRightRailWidth(value) {
 }
 
 async function submitTurn() {
-  if (!userInput.value.trim() || !gameStore.currentGameId) return
-  const action = userInput.value.trim()
-  userInput.value = ''
-  await streamTurn(async (onEvent) => runTurnStream(gameStore.currentGameId, action, onEvent))
+  if (!canSubmitTurn.value || !gameStore.currentGameId) return
+  const payload = buildTurnPayload()
+  actionInput.value = ''
+  dialogueInput.value = ''
+  localStorage.setItem('autoCompleteTurnBlank', String(autoCompleteBlank.value))
+  await streamTurn(async (onEvent) => runTurnStream(gameStore.currentGameId, payload, onEvent, { fast_mode: generationMode.value === 'fast' }))
+}
+
+function buildTurnPayload() {
+  const action = actionInput.value.trim()
+  const dialogue = dialogueInput.value.trim()
+  return {
+    user_input: formatTurnInput(action, dialogue, autoCompleteBlank.value),
+    action_input: action,
+    dialogue_input: dialogue,
+    auto_complete_blank: autoCompleteBlank.value
+  }
+}
+
+function formatTurnInput(action, dialogue, autoComplete) {
+  const lines = []
+  if (action) lines.push(`行动：${action}`)
+  if (dialogue) lines.push(`台词：${dialogue}`)
+  if (!action || !dialogue) lines.push(`空白补全：${autoComplete ? '开启' : '关闭'}`)
+  return lines.join('\n')
 }
 
 async function generateOpening() {

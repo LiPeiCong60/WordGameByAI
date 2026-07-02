@@ -1,11 +1,12 @@
 <template>
-  <details v-if="collapsible" class="panel collapsible-panel" open>
-    <summary class="panel-header collapsible-summary">
+  <section v-if="collapsible" class="panel collapsible-panel" :class="{ open: isOpen }">
+    <button type="button" class="panel-header collapsible-summary" :aria-expanded="isOpen" @click="isOpen = !isOpen">
       <h2>{{ title }}</h2>
       <span>{{ records.length }}</span>
-      <ChevronDown class="collapsible-icon" :size="17" />
-    </summary>
-    <div class="table-wrap compact">
+      <ChevronDown class="collapsible-icon" :class="{ open: isOpen }" :size="17" />
+    </button>
+    <p v-if="isOpen && !records.length" class="resource-empty">暂无物品</p>
+    <div v-show="isOpen && records.length" class="table-wrap compact">
       <table>
         <thead>
           <tr>
@@ -29,13 +30,14 @@
         </tbody>
       </table>
     </div>
-  </details>
+  </section>
   <section v-else class="panel">
     <header class="panel-header">
       <h2>{{ title }}</h2>
       <span>{{ records.length }}</span>
     </header>
-    <div class="table-wrap compact">
+    <p v-if="!records.length" class="resource-empty">暂无物品</p>
+    <div v-else class="table-wrap compact">
       <table>
         <thead>
           <tr>
@@ -63,6 +65,7 @@
 </template>
 
 <script setup>
+import { ref } from 'vue'
 import { ChevronDown } from 'lucide-vue-next'
 import { itemStateLabels, labelFor, ownerTypeLabels } from '../utils/labels'
 
@@ -70,8 +73,11 @@ const props = defineProps({
   title: { type: String, default: '库存' },
   records: { type: Array, default: () => [] },
   items: { type: Array, default: () => [] },
-  collapsible: { type: Boolean, default: false }
+  collapsible: { type: Boolean, default: false },
+  defaultOpen: { type: Boolean, default: true }
 })
+
+const isOpen = ref(props.defaultOpen)
 
 function itemName(id) {
   return props.items.find((item) => item.id === id)?.name || `#${id}`

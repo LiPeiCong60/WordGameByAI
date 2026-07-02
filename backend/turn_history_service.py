@@ -12,6 +12,7 @@ from models import (
     Game,
     InventoryRecord,
     Item,
+    RagMemory,
     StoryWorld,
     TurnLog,
     TurnSnapshot,
@@ -27,6 +28,7 @@ SNAPSHOT_MODELS = [
     (InventoryRecord, "inventory_records"),
     (WorldEvent, "world_events"),
     (TurnLog, "turn_logs"),
+    (RagMemory, "rag_memories"),
 ]
 
 
