@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
+from datetime import datetime
 
 from sqlmodel import Session, desc, select
 
@@ -272,6 +273,7 @@ def _pending_checker_result() -> dict:
         "issues": [],
         "pending": True,
         "async_state_update": True,
+        "queued_at": datetime.utcnow().isoformat(),
         "message": "状态整理已转入后台执行。",
     }
 

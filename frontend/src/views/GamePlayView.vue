@@ -183,6 +183,7 @@ const streamStatus = ref('')
 const stateSyncPending = ref(false)
 const stateSyncPolling = ref(false)
 const queuedTurnPayload = ref(null)
+const ignoredPendingTurnIds = ref(new Set())
 const storyMode = ref(localStorage.getItem('storyDisplayMode') || 'chat')
 const generationMode = ref(localStorage.getItem('generationMode') || 'fast')
 const rightRailWidth = ref(Number(localStorage.getItem('playRightRailWidth')) || 460)
@@ -191,10 +192,11 @@ const protagonist = computed(() => characters.value.find((item) => item.role_typ
 const npcs = computed(() => characters.value.filter((item) => item.role_type !== 'protagonist'))
 const checkerIssues = computed(() => latestTurn.value?.checker_result?.issues || [])
 const canSubmitTurn = computed(() => Boolean(actionInput.value.trim() || dialogueInput.value.trim()))
+const canContinueDuringStateSync = computed(() => generationMode.value === 'fast' || generationMode.value === 'instant')
 const submitButtonText = computed(() => {
   if (isStreaming.value) return '生成中...'
   if (queuedTurnPayload.value) return '已排队'
-  if (stateSyncPending.value) return '同步后推进'
+  if (stateSyncPending.value) return canContinueDuringStateSync.value ? '继续推进' : '同步后推进'
   if (branchEditTarget.value) return '重新分支'
   return '推进剧情'
 })
@@ -232,7 +234,7 @@ async function loadAll(options = {}) {
     const save = await exportGame(gameId)
     const logs = (save.turn_logs || []).map(normalizeTurnLog)
     turnLogs.value = logs.slice(-8)
-    stateSyncPending.value = logs.some(isStateSyncPending)
+    stateSyncPending.value = isStateSyncPending(logs[logs.length - 1])
     if (!isStreaming.value) latestTurn.value = null
     shouldGenerateOpening = autoOpening && logs.length === 0 && !isStreaming.value
   })
@@ -310,7 +312,10 @@ async function submitTurn() {
   dialogueInput.value = ''
   branchEditTarget.value = null
   localStorage.setItem('autoCompleteTurnBlank', String(autoCompleteBlank.value))
-  if (stateSyncPending.value) {
+  if (stateSyncPending.value && canContinueDuringStateSync.value) {
+    ignoreCurrentPendingTurn()
+    streamStatus.value = '上一轮状态仍在后台同步，本轮先按当前软状态推进...'
+  } else if (stateSyncPending.value) {
     queuedTurnPayload.value = { payload, branchTarget }
     streamStatus.value = '行动已排队，状态同步完成后自动推进...'
     startStateSyncPolling()
@@ -443,11 +448,31 @@ function pruneTurnLogsFrom(turnNumber) {
 }
 
 function isStateSyncPending(entry) {
-  return Boolean(entry?.checker_result?.pending)
+  if (!entry?.checker_result?.pending) return false
+  const turnId = entry.id || entry.turn_id
+  if (turnId && ignoredPendingTurnIds.value.has(turnId)) return false
+  return !isStalePendingTurn(entry)
 }
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function isStalePendingTurn(entry) {
+  const queuedAt = entry?.checker_result?.queued_at || entry?.created_at
+  if (!queuedAt) return false
+  const time = Date.parse(queuedAt)
+  if (!Number.isFinite(time)) return false
+  return Date.now() - time > 120000
+}
+
+function ignoreCurrentPendingTurn() {
+  const latest = turnLogs.value[turnLogs.value.length - 1]
+  const turnId = latest?.id || latest?.turn_id
+  if (turnId) {
+    ignoredPendingTurnIds.value = new Set([...ignoredPendingTurnIds.value, turnId])
+  }
+  stateSyncPending.value = false
 }
 
 function startStateSyncPolling() {
@@ -462,7 +487,7 @@ async function pollStateSync() {
   let queuedPayload = null
   streamStatus.value = '剧情已完成，状态后台同步中...'
   try {
-    for (let index = 0; index < 40; index += 1) {
+    for (let index = 0; index < 80; index += 1) {
       await sleep(1500)
       if (!gameStore.currentGameId) return
       await gameStore.loadCurrentGame()
@@ -475,7 +500,10 @@ async function pollStateSync() {
       }
     }
     if (stateSyncPending.value) {
-      streamStatus.value = '状态仍在后台同步，可稍后刷新查看'
+      ignoreCurrentPendingTurn()
+      queuedPayload = queuedTurnPayload.value
+      queuedTurnPayload.value = null
+      streamStatus.value = queuedPayload ? '状态同步耗时较长，先继续推进排队行动...' : '状态同步耗时较长，已允许继续；稍后刷新可查看最终状态。'
     }
   } finally {
     stateSyncPolling.value = false

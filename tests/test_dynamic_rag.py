@@ -530,10 +530,12 @@ class DynamicRagTests(unittest.TestCase):
             self.assertEqual(called["scheduled"], 1)
             self.assertTrue(result["async_state_update"])
             self.assertTrue(result["checker_result"]["pending"])
+            self.assertIn("queued_at", result["checker_result"])
 
             turn = db.exec(select(TurnLog).where(TurnLog.game_id == game.id)).one()
             checker_result = parse_json_field(turn.checker_result, default={})
             self.assertTrue(checker_result["pending"])
+            self.assertIn("queued_at", checker_result)
 
     def test_state_hint_applies_soft_character_state_immediately(self) -> None:
         with make_session() as db:
