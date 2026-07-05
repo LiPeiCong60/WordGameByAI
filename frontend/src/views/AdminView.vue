@@ -16,10 +16,20 @@
         <article v-for="user in users" :key="user.id">
           <strong>{{ user.username }}</strong>
           <span>{{ user.email || '未填写邮箱' }}</span>
-          <em>{{ user.is_admin ? '管理员' : '玩家' }} · {{ user.is_active ? '启用' : '停用' }}</em>
+          <em>
+            {{ user.is_admin ? '管理员' : '玩家' }} · {{ user.is_member ? '会员' : '非会员' }} ·
+            {{ user.is_active ? '启用' : '停用' }} ·
+            {{ quotaLabel(user) }}
+          </em>
+          <label class="compact-field">
+            <span>每日上限</span>
+            <input v-model.number="quotaDrafts[user.id]" type="number" min="0" />
+          </label>
           <div class="inline-actions">
             <button type="button" @click="toggleUserActive(user)">{{ user.is_active ? '停用' : '启用' }}</button>
             <button type="button" @click="toggleUserAdmin(user)">{{ user.is_admin ? '取消管理员' : '设为管理员' }}</button>
+            <button type="button" @click="toggleUserMember(user)">{{ user.is_member ? '取消会员' : '设为会员' }}</button>
+            <button type="button" @click="saveUserQuota(user)">保存额度</button>
           </div>
         </article>
       </div>
@@ -48,11 +58,13 @@ const ui = useUiStore()
 const summary = ref({})
 const users = ref([])
 const games = ref([])
+const quotaDrafts = ref({})
 
 async function load() {
   await ui.run(async () => {
     summary.value = await getAdminSummary()
     users.value = await listAdminUsers()
+    quotaDrafts.value = Object.fromEntries(users.value.map((user) => [user.id, user.daily_message_limit ?? 20]))
     games.value = await listAdminGames()
   })
 }
@@ -61,6 +73,7 @@ async function updateUser(user, data) {
   await ui.run(async () => {
     const updated = await updateAdminUser(user.id, data)
     users.value = users.value.map((item) => (item.id === updated.id ? updated : item))
+    quotaDrafts.value = { ...quotaDrafts.value, [updated.id]: updated.daily_message_limit ?? 20 }
   }, '用户状态已更新')
 }
 
@@ -70,6 +83,20 @@ function toggleUserActive(user) {
 
 function toggleUserAdmin(user) {
   updateUser(user, { is_admin: !user.is_admin })
+}
+
+function toggleUserMember(user) {
+  updateUser(user, { is_member: !user.is_member })
+}
+
+function saveUserQuota(user) {
+  updateUser(user, { daily_message_limit: Number(quotaDrafts.value[user.id] ?? 20) })
+}
+
+function quotaLabel(user) {
+  if (user.is_admin) return '不限额'
+  const effective = user.effective_daily_message_limit
+  return effective === null || effective === undefined ? '不限额' : `每日 ${effective} 条`
 }
 
 onMounted(load)

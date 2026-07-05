@@ -36,6 +36,8 @@ class User(TimestampMixin, table=True):
     email: str = Field(default="", index=True)
     password_hash: str = Field(default="", sa_column=Column(Text))
     is_admin: bool = False
+    is_member: bool = False
+    daily_message_limit: int = 20
     is_active: bool = True
     last_login_at: Optional[datetime] = None
 
@@ -55,6 +57,14 @@ class CaptchaChallenge(SQLModel, table=True):
     created_at: datetime = Field(default_factory=now_utc)
     expires_at: datetime = Field(index=True)
     used: bool = False
+
+
+class MessageUsage(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: int = Field(index=True)
+    usage_date: str = Field(index=True)
+    message_count: int = 0
+    updated_at: datetime = Field(default_factory=now_utc)
 
 
 class WorldTemplate(TimestampMixin, table=True):

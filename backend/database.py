@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 from sqlalchemy import inspect, text
 from sqlmodel import Session, SQLModel, create_engine, select
 
-from models import Character, Game, StoryWorld, WorldTemplate
+from models import Character, Game, StoryWorld, User, WorldTemplate
 from numeric_utils import as_int
 
 load_dotenv()
@@ -382,6 +382,16 @@ def normalize_numeric_fields(session: Session) -> None:
 def migrate_db_schema() -> None:
     inspector = inspect(engine)
     table_names = inspector.get_table_names()
+    if "user" in table_names:
+        user_columns = {column["name"] for column in inspector.get_columns("user")}
+        user_additions = {
+            "is_member": "BOOLEAN NOT NULL DEFAULT FALSE",
+            "daily_message_limit": "INTEGER NOT NULL DEFAULT 20",
+        }
+        with engine.begin() as connection:
+            for name, definition in user_additions.items():
+                if name not in user_columns:
+                    connection.execute(text(f"ALTER TABLE user ADD COLUMN {name} {definition}"))
     if "game" in table_names:
         game_columns = {column["name"] for column in inspector.get_columns("game")}
         if "owner_user_id" not in game_columns:

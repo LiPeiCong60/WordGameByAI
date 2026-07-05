@@ -243,7 +243,7 @@ pre {
 }
 
 .auth-panel {
-  width: min(460px, 100%);
+  width: min(560px, 100%);
   padding: 26px;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -263,15 +263,20 @@ pre {
   font-size: 22px;
 }
 
+.auth-panel button.primary {
+  grid-column: 1 / -1;
+}
+
 .auth-switch {
   margin: 14px 0 0;
   color: var(--muted);
 }
 
 .captcha-row {
+  grid-column: 1 / -1;
   display: grid;
-  grid-template-columns: 190px minmax(0, 1fr);
-  gap: 10px;
+  grid-template-columns: minmax(180px, 1fr) minmax(120px, 160px);
+  gap: 12px;
   align-items: end;
 }
 
@@ -280,6 +285,13 @@ pre {
   padding: 0;
   overflow: hidden;
   background: transparent;
+}
+
+.captcha-answer input {
+  text-align: center;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: 0;
 }
 
 .stat-grid {
@@ -327,6 +339,19 @@ pre {
   padding: 12px;
   display: grid;
   gap: 4px;
+}
+
+.compact-field {
+  display: grid;
+  grid-template-columns: 72px minmax(90px, 150px);
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.compact-field input {
+  min-height: 34px;
 }
 
 .inline-actions {
@@ -1642,6 +1667,7 @@ td small {
   .form-grid,
   .character-card dl,
   .info-list,
+  .captcha-row,
   .starter-character-fields,
   .starter-character-card > header {
     grid-template-columns: 1fr;

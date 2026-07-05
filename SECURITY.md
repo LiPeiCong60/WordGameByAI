@@ -26,4 +26,5 @@ User-uploaded files are stored under `backend/uploads/`, which is also ignored e
 - Keep `OPENAI_API_KEY` only in server environment variables or a private `.env`.
 - Rotate any key that has ever appeared in chat logs, screenshots, shell history, or Git history.
 - Use HTTPS for public deployments.
-- Consider replacing the lightweight built-in captcha with Turnstile/hCaptcha/reCAPTCHA and adding rate limits before opening registration publicly.
+- Login and registration both require captcha. Consider replacing the lightweight built-in captcha with Turnstile/hCaptcha/reCAPTCHA before opening registration publicly.
+- Keep per-user message quotas and rate limits enabled to control model cost and abuse.

@@ -41,6 +41,10 @@
         <label class="field"><span>题材</span><input v-model="form.genre" /></label>
         <label class="field"><span>世界类型</span><input v-model="form.world_type" /></label>
         <label class="field"><span>基调</span><input v-model="form.tone" /></label>
+        <label v-if="auth.isAdmin" class="check-field wide">
+          <input v-model="form.is_public" type="checkbox" />
+          公开模板
+        </label>
         <label class="field wide"><span>描述</span><textarea v-model="form.description" rows="3" /></label>
 
         <h2 class="form-section wide">新存档初始设定</h2>
@@ -152,6 +156,7 @@ const starterJson = () => JSON.stringify({
 const blank = () => ({
   id: null,
   owner_user_id: null,
+  is_public: false,
   name: '',
   genre: '',
   world_type: '',
@@ -208,7 +213,10 @@ function reset() {
 }
 
 function edit(template) {
-  Object.assign(form, template)
+  Object.assign(form, {
+    ...template,
+    is_public: template.owner_user_id === null || template.owner_user_id === undefined
+  })
   syncCharactersFromJson()
 }
 
@@ -227,6 +235,7 @@ function copyTemplate(template) {
     ...template,
     id: null,
     owner_user_id: auth.user?.id ?? null,
+    is_public: false,
     name: `${template.name || '模板'} 副本`
   })
   syncCharactersFromJson()

@@ -30,7 +30,7 @@ def register(payload: RegisterRequest, db: Session = Depends(get_session)):
 
 @router.post("/auth/login")
 def login(payload: LoginRequest, db: Session = Depends(get_session)):
-    return login_user(db, payload.username, payload.password)
+    return login_user(db, payload.username, payload.password, payload.captcha_id, payload.captcha_answer)
 
 
 @router.get("/auth/me")

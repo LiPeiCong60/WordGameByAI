@@ -52,6 +52,8 @@ def public_user(user: User) -> dict:
         "username": user.username,
         "email": user.email,
         "is_admin": user.is_admin,
+        "is_member": user.is_member,
+        "daily_message_limit": user.daily_message_limit,
     }
 
 
@@ -152,7 +154,9 @@ def issue_token(db: Session, user: User) -> dict:
     }
 
 
-def login_user(db: Session, username: str, password: str) -> dict:
+def login_user(db: Session, username: str, password: str, captcha_id: str | None = None, captcha_answer: str | None = None) -> dict:
+    if captcha_id is not None:
+        verify_captcha(db, captcha_id, captcha_answer or "")
     user = db.exec(select(User).where(User.username == (username or "").strip())).first()
     if not user or not user.is_active or not verify_password(password, user.password_hash):
         raise HTTPException(status_code=401, detail="用户名或密码错误。")

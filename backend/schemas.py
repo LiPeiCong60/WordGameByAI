@@ -39,6 +39,8 @@ class RegisterRequest(FlexibleModel):
 class LoginRequest(FlexibleModel):
     username: str
     password: str
+    captcha_id: str
+    captcha_answer: str
 
 
 class AuthUserResponse(FlexibleModel):
@@ -46,6 +48,8 @@ class AuthUserResponse(FlexibleModel):
     username: str
     email: str = ""
     is_admin: bool = False
+    is_member: bool = False
+    daily_message_limit: int = 20
 
 
 class AuthTokenResponse(FlexibleModel):
@@ -58,6 +62,8 @@ class AuthTokenResponse(FlexibleModel):
 class AdminUserUpdate(FlexibleModel):
     is_admin: Optional[bool] = None
     is_active: Optional[bool] = None
+    is_member: Optional[bool] = None
+    daily_message_limit: Optional[int] = None
 
 
 class GameUpdate(FlexibleModel):
@@ -74,6 +80,7 @@ class GameUpdate(FlexibleModel):
 
 class TemplateCreate(FlexibleModel):
     name: str
+    is_public: bool = False
     genre: str = ""
     world_type: str = ""
     tone: str = ""
@@ -85,6 +92,7 @@ class TemplateCreate(FlexibleModel):
 
 class TemplateUpdate(FlexibleModel):
     name: Optional[str] = None
+    is_public: Optional[bool] = None
     genre: Optional[str] = None
     world_type: Optional[str] = None
     tone: Optional[str] = None

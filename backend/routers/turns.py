@@ -9,6 +9,7 @@ from sqlmodel import Session
 from auth_service import get_current_user, require_game_access
 from database import get_session
 from game_engine import run_game_turn, run_game_turn_stream, run_opening_turn, run_opening_turn_stream
+from message_quota_service import require_message_quota
 from models import TurnLog, User
 from schemas import TurnRequest
 from turn_history_service import delete_turns_from, get_turn_for_action, regenerate_turn
@@ -19,6 +20,7 @@ router = APIRouter()
 @router.post("/games/{game_id}/turn")
 def create_turn(game_id: int, payload: TurnRequest, db: Session = Depends(get_session), user: User = Depends(get_current_user)):
     require_game_access(db, game_id, user)
+    require_message_quota(db, user)
     try:
         return run_game_turn(
             game_id,
@@ -45,6 +47,7 @@ def _stream_json_events(events):
 @router.post("/games/{game_id}/turn/stream")
 def create_turn_stream(game_id: int, payload: TurnRequest, db: Session = Depends(get_session), user: User = Depends(get_current_user)):
     require_game_access(db, game_id, user)
+    require_message_quota(db, user)
     return StreamingResponse(
         _stream_json_events(
             run_game_turn_stream(
@@ -63,6 +66,7 @@ def create_turn_stream(game_id: int, payload: TurnRequest, db: Session = Depends
 @router.post("/games/{game_id}/opening")
 def create_opening(game_id: int, db: Session = Depends(get_session), user: User = Depends(get_current_user)):
     require_game_access(db, game_id, user)
+    require_message_quota(db, user)
     try:
         return run_opening_turn(game_id, db)
     except ValueError as exc:
@@ -72,6 +76,7 @@ def create_opening(game_id: int, db: Session = Depends(get_session), user: User 
 @router.post("/games/{game_id}/opening/stream")
 def create_opening_stream(game_id: int, db: Session = Depends(get_session), user: User = Depends(get_current_user)):
     require_game_access(db, game_id, user)
+    require_message_quota(db, user)
     return StreamingResponse(
         _stream_json_events(run_opening_turn_stream(game_id, db)),
         media_type="application/x-ndjson",
@@ -101,6 +106,7 @@ def regenerate_existing_turn(
 ):
     turn = get_turn_for_action(turn_id, db, game_id=game_id, turn_number=turn_number)
     require_game_access(db, turn.game_id, user)
+    require_message_quota(db, user)
     return regenerate_turn(turn_id, db, game_id=game_id, turn_number=turn_number)
 
 
@@ -114,6 +120,7 @@ def regenerate_existing_turn_stream(
 ):
     turn = get_turn_for_action(turn_id, db, game_id=game_id, turn_number=turn_number)
     require_game_access(db, turn.game_id, user)
+    require_message_quota(db, user)
     game_id = turn.game_id
     user_input = turn.user_input
 

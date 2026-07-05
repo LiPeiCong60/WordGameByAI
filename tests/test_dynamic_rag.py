@@ -13,19 +13,21 @@ BACKEND = ROOT / "backend"
 sys.path.insert(0, str(BACKEND))
 
 import game_engine
+import message_quota_service
 import routers.management as management_router
 import routers.templates as templates_router
 from database import DEFAULT_TEMPLATES, normalize_template_character_fields
 from auth_service import _sha256, login_user, register_user
 from agents.protagonist_agent import run_protagonist_fallback
 from json_utils import parse_json_field
-from models import CaptchaChallenge, Character, Game, RagMemory, TurnLog, User, WorldLore, WorldTemplate
+from models import CaptchaChallenge, Character, Game, MessageUsage, RagMemory, TurnLog, User, WorldLore, WorldTemplate
 from patch_applier import apply_state_patch
 from rag_service import retrieve_related_memories, store_turn_memory
 from routers.rag import rebuild_game_rag, search_rag_memories
 from schemas import ManagementChatRequest, ManagementSessionCreate, RagSearchRequest, TemplateCreate, TemplateUpdate, TurnRequest
 from starter_character_service import CHARACTER_FIELDS
 from turn_history_service import delete_turns_from
+from message_quota_service import require_message_quota
 
 
 def make_session() -> Session:
@@ -103,6 +105,27 @@ class DynamicRagTests(unittest.TestCase):
             login_session = login_user(db, "admin_test", "password123")
             self.assertEqual(login_session["user"]["username"], "admin_test")
 
+    def test_login_requires_valid_captcha_when_provided(self) -> None:
+        with make_session() as db:
+            register_captcha = CaptchaChallenge(
+                id="captcha-register",
+                answer_hash=_sha256("12"),
+                expires_at=datetime.utcnow() + timedelta(minutes=5),
+            )
+            login_captcha = CaptchaChallenge(
+                id="captcha-login",
+                answer_hash=_sha256("9"),
+                expires_at=datetime.utcnow() + timedelta(minutes=5),
+            )
+            db.add(register_captcha)
+            db.add(login_captcha)
+            db.commit()
+
+            register_user(db, "login_captcha_user", "password123", "", "captcha-register", "12")
+            with self.assertRaises(Exception) as raised:
+                login_user(db, "login_captcha_user", "password123", "captcha-login", "8")
+            self.assertEqual(getattr(raised.exception, "status_code", None), 400)
+
     def test_template_management_routes_allow_global_admin_session(self) -> None:
         with make_session() as db:
             admin = test_user()
@@ -144,11 +167,13 @@ class DynamicRagTests(unittest.TestCase):
             normal = User(id=2, username="normal", is_admin=False)
             other = User(id=3, username="other", is_admin=False)
 
-            public_template = templates_router.create_template(TemplateCreate(name="公共奇幻", genre="奇幻"), db, admin)
+            public_template = templates_router.create_template(TemplateCreate(name="公共奇幻", genre="奇幻", is_public=True), db, admin)
+            admin_private_template = templates_router.create_template(TemplateCreate(name="管理员私有", genre="管理", is_public=False), db, admin)
             own_template = templates_router.create_template(TemplateCreate(name="我的校园", genre="校园"), db, normal)
             other_template = templates_router.create_template(TemplateCreate(name="别人末日", genre="末日"), db, other)
 
             self.assertIsNone(public_template.owner_user_id)
+            self.assertEqual(admin_private_template.owner_user_id, admin.id)
             self.assertEqual(own_template.owner_user_id, normal.id)
             self.assertEqual(other_template.owner_user_id, other.id)
 
@@ -163,6 +188,42 @@ class DynamicRagTests(unittest.TestCase):
 
             updated = templates_router.update_template(own_template.id, TemplateUpdate(tone="轻松"), db, normal)
             self.assertEqual(updated.tone, "轻松")
+            made_private = templates_router.update_template(public_template.id, TemplateUpdate(is_public=False), db, admin)
+            self.assertEqual(made_private.owner_user_id, admin.id)
+
+    def test_message_quota_limits_normal_users_and_allows_member_override(self) -> None:
+        old_short_limit = message_quota_service.RATE_LIMIT_MAX_REQUESTS
+        message_quota_service.RATE_LIMIT_MAX_REQUESTS = 100
+        message_quota_service._recent_requests.clear()
+        try:
+            with make_session() as db:
+                normal = User(id=2, username="normal", is_admin=False, is_member=False, daily_message_limit=20)
+                db.add(normal)
+                db.commit()
+                for _ in range(20):
+                    require_message_quota(db, normal)
+                with self.assertRaises(Exception) as raised:
+                    require_message_quota(db, normal)
+                self.assertEqual(getattr(raised.exception, "status_code", None), 429)
+                usage = db.exec(select(MessageUsage).where(MessageUsage.user_id == normal.id)).one()
+                self.assertEqual(usage.message_count, 20)
+
+                member = User(id=3, username="member", is_member=True, daily_message_limit=25)
+                db.add(member)
+                db.commit()
+                for _ in range(25):
+                    require_message_quota(db, member)
+                with self.assertRaises(Exception) as member_raised:
+                    require_message_quota(db, member)
+                self.assertEqual(getattr(member_raised.exception, "status_code", None), 429)
+
+                admin = User(id=4, username="admin", is_admin=True, daily_message_limit=1)
+                for _ in range(3):
+                    result = require_message_quota(db, admin)
+                    self.assertIsNone(result["limit"])
+        finally:
+            message_quota_service.RATE_LIMIT_MAX_REQUESTS = old_short_limit
+            message_quota_service._recent_requests.clear()
 
     def test_default_templates_include_all_starter_character_fields(self) -> None:
         for template in DEFAULT_TEMPLATES:

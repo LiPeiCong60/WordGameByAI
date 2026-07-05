@@ -5,6 +5,7 @@ from sqlmodel import Session, func, select
 
 from auth_service import require_admin
 from database import get_session
+from message_quota_service import DEFAULT_NON_MEMBER_DAILY_LIMIT, effective_daily_message_limit
 from models import Game, ManagementProposal, TurnLog, User
 from schemas import AdminUserUpdate
 
@@ -32,6 +33,9 @@ def list_users(_admin: User = Depends(require_admin), db: Session = Depends(get_
             "username": user.username,
             "email": user.email,
             "is_admin": user.is_admin,
+            "is_member": user.is_member,
+            "daily_message_limit": user.daily_message_limit,
+            "effective_daily_message_limit": effective_daily_message_limit(user),
             "is_active": user.is_active,
             "created_at": user.created_at,
             "last_login_at": user.last_login_at,
@@ -54,6 +58,14 @@ def update_user(user_id: int, payload: AdminUserUpdate, admin: User = Depends(re
         user.is_active = payload.is_active
     if payload.is_admin is not None:
         user.is_admin = payload.is_admin
+    if payload.is_member is not None:
+        user.is_member = payload.is_member
+    if payload.daily_message_limit is not None:
+        if payload.daily_message_limit < 0:
+            raise HTTPException(status_code=400, detail="每日消息上限不能小于 0。")
+        if not user.is_member and payload.daily_message_limit > DEFAULT_NON_MEMBER_DAILY_LIMIT:
+            raise HTTPException(status_code=400, detail=f"非会员每日消息上限不能超过 {DEFAULT_NON_MEMBER_DAILY_LIMIT}。")
+        user.daily_message_limit = payload.daily_message_limit
     db.add(user)
     db.commit()
     db.refresh(user)
@@ -62,6 +74,9 @@ def update_user(user_id: int, payload: AdminUserUpdate, admin: User = Depends(re
         "username": user.username,
         "email": user.email,
         "is_admin": user.is_admin,
+        "is_member": user.is_member,
+        "daily_message_limit": user.daily_message_limit,
+        "effective_daily_message_limit": effective_daily_message_limit(user),
         "is_active": user.is_active,
         "created_at": user.created_at,
         "last_login_at": user.last_login_at,

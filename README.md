@@ -121,6 +121,9 @@ OPENAI_MODEL=gpt-4o-mini
 DATABASE_URL=sqlite:///./narrative_agent.db
 CORS_ALLOW_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
 AUTH_TOKEN_TTL_DAYS=14
+NON_MEMBER_DAILY_MESSAGE_LIMIT=20
+MESSAGE_RATE_LIMIT_WINDOW_SECONDS=60
+MESSAGE_RATE_LIMIT_MAX_REQUESTS=10
 ```
 
 如果不配置 API Key，系统仍可启动，但 Agent 调用会返回 `LLM API key is not configured.`。
@@ -182,6 +185,9 @@ AUTH_TOKEN_TTL_DAYS=14
 | `DATABASE_URL` | SQLModel 数据库连接地址。 | 否，默认本地 SQLite |
 | `CORS_ALLOW_ORIGINS` | 允许访问后端 API 的前端域名，公网部署时必须改成你的 HTTPS 域名。 | 否，本地开发地址 |
 | `AUTH_TOKEN_TTL_DAYS` | 登录 token 有效天数。 | 否，默认 `14` |
+| `NON_MEMBER_DAILY_MESSAGE_LIMIT` | 非会员每日可发送的大模型消息数上限。管理员和会员可在后台按用户调整。 | 否，默认 `20` |
+| `MESSAGE_RATE_LIMIT_WINDOW_SECONDS` | 消息短窗限流窗口秒数。 | 否，默认 `60` |
+| `MESSAGE_RATE_LIMIT_MAX_REQUESTS` | 单用户短窗内最多消息请求数。 | 否，默认 `10` |
 | `VITE_API_BASE_URL` | 前端 API 地址，运行前端时可通过环境变量传入。 | 否，默认 `http://localhost:8000/api` |
 
 ## API 接口说明

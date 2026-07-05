@@ -23,7 +23,9 @@ def list_templates(db: Session = Depends(get_session), user: User = Depends(get_
 
 @router.post("/templates")
 def create_template(payload: TemplateCreate, db: Session = Depends(get_session), user: User = Depends(get_current_user)):
-    return crud.create_record(db, WorldTemplate, payload, extra={"owner_user_id": None if user.is_admin else user.id})
+    data = payload.model_dump()
+    is_public = bool(data.pop("is_public", False)) if user.is_admin else False
+    return crud.create_record(db, WorldTemplate, data, extra={"owner_user_id": None if is_public else user.id})
 
 
 def require_template_write_access(template: WorldTemplate, user: User) -> None:
@@ -40,7 +42,11 @@ def require_template_write_access(template: WorldTemplate, user: User) -> None:
 def update_template(template_id: int, payload: TemplateUpdate, db: Session = Depends(get_session), user: User = Depends(get_current_user)):
     template = crud.get_or_404(db, WorldTemplate, template_id, "模板")
     require_template_write_access(template, user)
-    return crud.update_record(db, template, payload)
+    data = payload.model_dump(exclude_unset=True)
+    is_public = data.pop("is_public", None)
+    if user.is_admin and is_public is not None:
+        template.owner_user_id = None if is_public else user.id
+    return crud.update_record(db, template, data)
 
 
 @router.delete("/templates/{template_id}")

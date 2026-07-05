@@ -293,7 +293,8 @@ def _apply_create(db: Session, model, game_id: int, action: dict, user: User | N
     fields = _action_fields(model, action)
     fields.pop("id", None)
     if model is WorldTemplate:
-        return crud.create_record(db, model, fields, extra={"owner_user_id": None if user and user.is_admin else getattr(user, "id", None)})
+        is_public = bool(fields.pop("is_public", False)) if user and user.is_admin else False
+        return crud.create_record(db, model, fields, extra={"owner_user_id": None if is_public else getattr(user, "id", None)})
     return crud.create_record(db, model, fields, extra={"game_id": game_id})
 
 
@@ -304,6 +305,10 @@ def _apply_update(db: Session, model, game_id: int, action: dict, user: User | N
     if model is WorldTemplate:
         _ensure_template_write_access(target, user)
     fields = _action_fields(model, action)
+    if model is WorldTemplate:
+        is_public = fields.pop("is_public", None)
+        if user and user.is_admin and is_public is not None:
+            target.owner_user_id = None if is_public else user.id
     return crud.update_record(db, target, fields)
 
 
