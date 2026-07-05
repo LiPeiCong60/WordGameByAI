@@ -10,13 +10,10 @@ from json_utils import parse_json_field
 from models import (
     Character,
     Game,
-    InventoryRecord,
-    Item,
     RagMemory,
     StoryWorld,
     TurnLog,
     TurnSnapshot,
-    WorldEvent,
     WorldLore,
 )
 
@@ -24,9 +21,6 @@ SNAPSHOT_MODELS = [
     (StoryWorld, "story_worlds"),
     (WorldLore, "world_lore"),
     (Character, "characters"),
-    (Item, "items"),
-    (InventoryRecord, "inventory_records"),
-    (WorldEvent, "world_events"),
     (TurnLog, "turn_logs"),
     (RagMemory, "rag_memories"),
 ]
@@ -44,10 +38,17 @@ def _strip_runtime_fields(row: dict) -> dict:
     return data
 
 
-def _get_turn(db: Session, turn_id: int) -> TurnLog:
+def _get_turn(db: Session, turn_id: int, game_id: int | None = None, turn_number: int | None = None) -> TurnLog:
     turn = db.get(TurnLog, turn_id)
+    if turn:
+        return turn
+    if game_id and turn_number:
+        turn = db.exec(
+            select(TurnLog).where(TurnLog.game_id == game_id, TurnLog.turn_number == turn_number)
+        ).first()
     if not turn:
-        raise HTTPException(status_code=404, detail=f"找不到剧情记录: {turn_id}")
+        fallback = f"，game_id={game_id}, turn_number={turn_number}" if game_id and turn_number else ""
+        raise HTTPException(status_code=404, detail=f"找不到剧情记录: {turn_id}{fallback}")
     return turn
 
 
@@ -99,8 +100,22 @@ def restore_game_snapshot(game_id: int, snapshot_payload: dict, db: Session) -> 
     db.commit()
 
 
-def delete_turns_from(turn_id: int, db: Session) -> dict:
-    turn = _get_turn(db, turn_id)
+def get_turn_for_action(
+    turn_id: int,
+    db: Session,
+    game_id: int | None = None,
+    turn_number: int | None = None,
+) -> TurnLog:
+    return _get_turn(db, turn_id, game_id=game_id, turn_number=turn_number)
+
+
+def delete_turns_from(
+    turn_id: int,
+    db: Session,
+    game_id: int | None = None,
+    turn_number: int | None = None,
+) -> dict:
+    turn = _get_turn(db, turn_id, game_id=game_id, turn_number=turn_number)
     snapshot = _get_snapshot(db, turn)
     if snapshot:
         payload = parse_json_field(snapshot.snapshot_json, default={})
@@ -128,10 +143,15 @@ def delete_turns_from(turn_id: int, db: Session) -> dict:
     }
 
 
-def regenerate_turn(turn_id: int, db: Session) -> dict:
-    turn = _get_turn(db, turn_id)
+def regenerate_turn(
+    turn_id: int,
+    db: Session,
+    game_id: int | None = None,
+    turn_number: int | None = None,
+) -> dict:
+    turn = _get_turn(db, turn_id, game_id=game_id, turn_number=turn_number)
     user_input = turn.user_input
-    rollback_result = delete_turns_from(turn_id, db)
+    rollback_result = delete_turns_from(turn.id, db)
     result = run_game_turn(turn.game_id, user_input, db) if user_input else run_opening_turn(turn.game_id, db)
     return {
         "ok": True,

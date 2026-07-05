@@ -183,6 +183,9 @@ function withGameFlavor(character, game) {
     ...character,
     current_location: character.current_location || location,
     status: character.status || 'normal',
+    affection_score: character.affection_score ?? 0,
+    trust_score: character.trust_score ?? 0,
+    tension_score: character.tension_score ?? 0,
     memory_summary: character.memory_summary || '故事刚开始，角色还没有长期记忆。',
     extra_attrs: JSON.stringify(
       {

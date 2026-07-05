@@ -123,7 +123,7 @@ async function enterGame(game) {
 }
 
 async function remove(id) {
-  if (!window.confirm('确定彻底删除这个存档吗？角色、物品、库存、世界、事件、剧情记录和管理对话都会一起删除。')) return
+  if (!window.confirm('确定彻底删除这个存档吗？角色、世界、设定、剧情记录和管理对话都会一起删除。')) return
   await ui.run(async () => {
     await deleteGame(id)
     if (gameStore.currentGameId === id) gameStore.clear()

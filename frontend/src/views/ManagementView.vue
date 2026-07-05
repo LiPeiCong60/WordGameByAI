@@ -70,8 +70,8 @@
         v-model:message="message"
         :sessions="sessions"
         :scopes="scopeOptions"
-        :reply="reply"
-        :proposal="proposal"
+        :messages="agentMessages"
+        :pending="agentPending"
         @create-session="createSession"
         @send="send"
         @apply="apply"
@@ -98,9 +98,6 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   BookOpen,
-  Boxes,
-  CalendarClock,
-  ClipboardList,
   Database,
   Download,
   Globe2,
@@ -114,10 +111,7 @@ import ManagementAgentPanel from '../components/ManagementAgentPanel.vue'
 import NoGamePrompt from '../components/NoGamePrompt.vue'
 import SaveContextBar from '../components/SaveContextBar.vue'
 import CharacterView from './CharacterView.vue'
-import EventView from './EventView.vue'
 import GameListView from './GameListView.vue'
-import InventoryView from './InventoryView.vue'
-import ItemView from './ItemView.vue'
 import LoreView from './LoreView.vue'
 import WorldView from './WorldView.vue'
 import { applyProposal, createManagementSession, listManagementSessions, rejectProposal, sendManagementMessage } from '../api/management'
@@ -133,21 +127,19 @@ const sessions = ref([])
 const sessionId = ref(0)
 const scope = ref('综合管理')
 const message = ref('')
-const reply = ref('')
-const proposal = ref(null)
+const agentMessages = ref([])
+const agentPending = ref(false)
 const lastResult = ref(null)
 const activeKey = ref('save')
 const refreshKey = ref(0)
+let nextAgentMessageId = 1
 
 const tabs = [
   { key: 'list', label: '存档列表', scope: '综合管理', icon: Database },
   { key: 'save', label: '存档', scope: '存档', icon: Database },
   { key: 'characters', label: '角色', scope: '角色', icon: Users, component: CharacterView },
-  { key: 'items', label: '物品', scope: '物品', icon: Boxes, component: ItemView },
-  { key: 'inventory', label: '库存', scope: '库存', icon: ClipboardList, component: InventoryView },
   { key: 'worlds', label: '世界', scope: '世界', icon: Globe2, component: WorldView },
-  { key: 'lore', label: '设定', scope: '设定', icon: BookOpen, component: LoreView },
-  { key: 'events', label: '事件', scope: '事件', icon: CalendarClock, component: EventView }
+  { key: 'lore', label: '设定', scope: '设定', icon: BookOpen, component: LoreView }
 ]
 
 const scopeOptions = [
@@ -175,9 +167,25 @@ function syncSaveForm() {
 }
 
 function resetTransientState() {
-  reply.value = ''
-  proposal.value = null
+  agentMessages.value = []
+  agentPending.value = false
   lastResult.value = null
+}
+
+function addAgentMessage(role, text, extra = {}) {
+  agentMessages.value.push({
+    id: nextAgentMessageId++,
+    role,
+    text,
+    scope: role === 'user' ? scope.value : '',
+    ...extra
+  })
+}
+
+function clearAgentProposal(proposalId) {
+  agentMessages.value = agentMessages.value.map((item) => (
+    item.proposal?.proposal_id === proposalId ? { ...item, proposal: null } : item
+  ))
 }
 
 function selectTab(key) {
@@ -225,21 +233,33 @@ async function createSession() {
 }
 
 async function send() {
-  if (!message.value.trim()) return
-  await ui.run(async () => {
-    if (!sessionId.value) await ensureSession()
-    const result = await sendManagementMessage(sessionId.value, message.value.trim(), scope.value)
-    reply.value = result.reply
-    proposal.value = result.requires_confirmation ? result : null
-    lastResult.value = null
-    message.value = ''
-  })
+  const outgoing = message.value.trim()
+  if (!outgoing || agentPending.value) return
+  if (!sessionId.value) await ensureSession()
+  if (!sessionId.value) return
+  addAgentMessage('user', outgoing)
+  message.value = ''
+  lastResult.value = null
+  agentPending.value = true
+  try {
+    await ui.run(async () => {
+      const result = await sendManagementMessage(sessionId.value, outgoing, scope.value)
+      addAgentMessage('assistant', result.reply || '已收到。', {
+        proposal: result.requires_confirmation ? result : null
+      })
+    })
+  } catch (error) {
+    addAgentMessage('assistant', ui.error || error?.message || '请求失败。')
+  } finally {
+    agentPending.value = false
+  }
 }
 
 async function apply(id) {
   await ui.run(async () => {
     lastResult.value = await applyProposal(id)
-    proposal.value = null
+    clearAgentProposal(id)
+    addAgentMessage('status', '方案已执行。', { result: lastResult.value })
     await gameStore.loadCurrentGame()
     syncSaveForm()
     refreshKey.value += 1
@@ -249,7 +269,8 @@ async function apply(id) {
 async function reject(id) {
   await ui.run(async () => {
     lastResult.value = await rejectProposal(id)
-    proposal.value = null
+    clearAgentProposal(id)
+    addAgentMessage('status', '方案已拒绝。', { result: lastResult.value })
   })
 }
 
@@ -278,7 +299,7 @@ async function downloadCurrentSave() {
 }
 
 async function removeCurrentGame() {
-  if (!window.confirm('确定彻底删除当前存档吗？角色、物品、库存、世界、设定、事件和剧情记录都会一起删除。')) return
+  if (!window.confirm('确定彻底删除当前存档吗？角色、世界、设定和剧情记录都会一起删除。')) return
   await ui.run(async () => {
     await deleteGame(gameStore.currentGameId)
     gameStore.clear()

@@ -10,7 +10,7 @@ from typing import Any
 from sqlmodel import Session, select
 
 from json_utils import dump_json_field, parse_json_field
-from models import Character, Game, RagMemory, TurnLog, WorldEvent, WorldLore
+from models import Character, Game, RagMemory, TurnLog, WorldLore
 
 VECTOR_SIZE = 256
 MAX_MEMORY_CONTENT = 900
@@ -97,7 +97,7 @@ def sync_rag_memories(game_id: int, db: Session) -> dict[str, int]:
     if not game:
         raise ValueError(f"找不到游戏: {game_id}")
 
-    counts = {"world_lore": 0, "characters": 0, "world_events": 0}
+    counts = {"world_lore": 0, "characters": 0}
 
     for lore in db.exec(select(WorldLore).where(WorldLore.game_id == game_id)).all():
         content = f"分类:{lore.category}\n权威级别:{lore.canon_level}\n设定:{lore.content}"
@@ -115,6 +115,9 @@ def sync_rag_memories(game_id: int, db: Session) -> dict[str, int]:
             f"心情:{character.mood}",
             f"与玩家关系:{character.relationship_to_player}",
             f"关系分:{character.relationship_score}",
+            f"好感度:{character.affection_score}",
+            f"信任度:{character.trust_score}",
+            f"张力:{character.tension_score}",
             f"当前目标:{character.current_goal}",
             f"隐藏目标:{character.hidden_goal}",
             f"长期记忆:{character.memory_summary}",
@@ -122,21 +125,6 @@ def sync_rag_memories(game_id: int, db: Session) -> dict[str, int]:
         tags = ",".join(filter(None, ["character", character.role_type, character.name]))
         if _upsert_memory(db, game_id, "character", character.id, character.name, "\n".join(parts), tags, 7):
             counts["characters"] += 1
-
-    for event in db.exec(select(WorldEvent).where(WorldEvent.game_id == game_id)).all():
-        content = "\n".join(
-            [
-                f"类型:{event.event_type}",
-                f"地点:{event.location}",
-                f"参与者:{event.participants}",
-                f"摘要:{event.summary}",
-                f"后果:{event.consequence}",
-                f"状态:{event.status}",
-            ]
-        )
-        tags = ",".join(filter(None, ["event", event.event_type, event.participants]))
-        if _upsert_memory(db, game_id, "world_event", event.id, event.title, content, tags, event.importance):
-            counts["world_events"] += 1
 
     db.commit()
     return counts
@@ -191,19 +179,10 @@ def _summarize_state_patch(state_patch: dict[str, Any]) -> list[str]:
     lines: list[str] = []
     if state_patch.get("current_state_update"):
         lines.append(f"当前状态更新:{state_patch['current_state_update']}")
-    for item in state_patch.get("new_events") or []:
-        if isinstance(item, dict):
-            lines.append(f"新增事件:{item.get('title') or item.get('summary') or item}")
     for item in state_patch.get("updated_characters") or []:
         if isinstance(item, dict):
             changes = ", ".join(f"{key}={value}" for key, value in item.items() if key != "name")
             lines.append(f"角色变化:{item.get('name', '未知角色')} {changes}")
-    for item in state_patch.get("inventory_updates") or []:
-        if isinstance(item, dict):
-            lines.append(
-                f"库存变化:{item.get('action', '')} {item.get('item_name') or item.get('item_id') or ''} "
-                f"{item.get('owner_name') or item.get('owner_id') or ''}".strip()
-            )
     return lines
 
 

@@ -22,6 +22,9 @@ CHARACTER_FIELDS = {
     "mood",
     "relationship_to_player",
     "relationship_score",
+    "affection_score",
+    "trust_score",
+    "tension_score",
     "current_goal",
     "hidden_goal",
     "memory_summary",
@@ -263,6 +266,9 @@ def _clean_character(data: dict, game: Game) -> dict:
     cleaned.setdefault("status", "normal")
     cleaned.setdefault("mood", "平静")
     cleaned.setdefault("relationship_score", 0)
+    cleaned.setdefault("affection_score", 0)
+    cleaned.setdefault("trust_score", 0)
+    cleaned.setdefault("tension_score", 0)
     cleaned.setdefault("memory_summary", "故事刚开始，角色还没有长期记忆。")
     cleaned.setdefault("agent_enabled", role_type != "protagonist")
     cleaned.setdefault("extra_attrs", "{}")

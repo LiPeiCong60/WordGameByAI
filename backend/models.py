@@ -18,6 +18,7 @@ class TimestampMixin(SQLModel):
 
 class Game(TimestampMixin, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
+    owner_user_id: Optional[int] = Field(default=None, index=True)
     title: str
     genre: str = ""
     world_type: str = ""
@@ -29,8 +30,36 @@ class Game(TimestampMixin, table=True):
     current_story_world_id: Optional[int] = None
 
 
+class User(TimestampMixin, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    username: str = Field(index=True)
+    email: str = Field(default="", index=True)
+    password_hash: str = Field(default="", sa_column=Column(Text))
+    is_admin: bool = False
+    is_active: bool = True
+    last_login_at: Optional[datetime] = None
+
+
+class AuthToken(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: int = Field(index=True)
+    token_hash: str = Field(index=True)
+    created_at: datetime = Field(default_factory=now_utc)
+    expires_at: datetime = Field(index=True)
+    revoked: bool = False
+
+
+class CaptchaChallenge(SQLModel, table=True):
+    id: str = Field(primary_key=True)
+    answer_hash: str = Field(default="", sa_column=Column(Text))
+    created_at: datetime = Field(default_factory=now_utc)
+    expires_at: datetime = Field(index=True)
+    used: bool = False
+
+
 class WorldTemplate(TimestampMixin, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
+    owner_user_id: Optional[int] = Field(default=None, index=True)
     name: str
     genre: str = ""
     world_type: str = ""
@@ -82,62 +111,13 @@ class Character(TimestampMixin, table=True):
     mood: str = ""
     relationship_to_player: str = ""
     relationship_score: int = 0
+    affection_score: int = 0
+    trust_score: int = 0
+    tension_score: int = 0
     current_goal: str = Field(default="", sa_column=Column(Text))
     hidden_goal: str = Field(default="", sa_column=Column(Text))
     memory_summary: str = Field(default="", sa_column=Column(Text))
     agent_enabled: bool = True
-    extra_attrs: str = Field(default="{}", sa_column=Column(Text))
-
-
-class Item(TimestampMixin, table=True):
-    id: Optional[int] = Field(default=None, primary_key=True)
-    game_id: int = Field(index=True)
-    name: str
-    item_type: str = "普通物品"
-    description: str = Field(default="", sa_column=Column(Text))
-    status: str = "normal"
-    rarity: str = "common"
-    quantity_limit: int = 99
-    is_stackable: bool = True
-    is_equippable: bool = False
-    is_consumable: bool = False
-    is_key_item: bool = False
-    is_tradeable: bool = True
-    is_unique: bool = False
-    usable_condition: str = Field(default="", sa_column=Column(Text))
-    effect_description: str = Field(default="", sa_column=Column(Text))
-    current_location: str = ""
-    importance: int = 5
-    extra_attrs: str = Field(default="{}", sa_column=Column(Text))
-
-
-class InventoryRecord(TimestampMixin, table=True):
-    id: Optional[int] = Field(default=None, primary_key=True)
-    game_id: int = Field(index=True)
-    item_id: int = Field(index=True)
-    owner_type: str = "character"
-    owner_id: Optional[int] = Field(default=None, index=True)
-    owner_name: str = ""
-    quantity: int = 1
-    equipped: bool = False
-    storage_location: str = ""
-    item_state: str = "normal"
-    note: str = Field(default="", sa_column=Column(Text))
-
-
-class WorldEvent(TimestampMixin, table=True):
-    id: Optional[int] = Field(default=None, primary_key=True)
-    game_id: int = Field(index=True)
-    title: str
-    event_type: str = "背景事件"
-    arc_name: str = ""
-    related_world: str = ""
-    summary: str = Field(default="", sa_column=Column(Text))
-    location: str = ""
-    participants: str = Field(default="", sa_column=Column(Text))
-    consequence: str = Field(default="", sa_column=Column(Text))
-    status: str = "active"
-    importance: int = 5
     extra_attrs: str = Field(default="{}", sa_column=Column(Text))
 
 
@@ -178,6 +158,7 @@ class TurnSnapshot(SQLModel, table=True):
 class ManagementSession(TimestampMixin, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     game_id: int = Field(index=True)
+    owner_user_id: Optional[int] = Field(default=None, index=True)
     title: str = "管理对话"
     status: str = "active"
 
@@ -186,6 +167,7 @@ class ManagementProposal(TimestampMixin, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     game_id: int = Field(index=True)
     session_id: int = Field(index=True)
+    owner_user_id: Optional[int] = Field(default=None, index=True)
     user_request: str = Field(default="", sa_column=Column(Text))
     agent_response: str = Field(default="", sa_column=Column(Text))
     proposed_actions: str = Field(default="[]", sa_column=Column(Text))

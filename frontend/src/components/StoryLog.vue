@@ -56,6 +56,7 @@
           class="story-icon-button"
           title="从这里重新分支"
           aria-label="从这里重新分支"
+          :disabled="actionsDisabled || !entry.turn_number"
           @click="$emit('delete-from', entry)"
         >
           <Pencil :size="14" />
@@ -65,6 +66,7 @@
           class="story-icon-button"
           title="重新生成"
           aria-label="重新生成"
+          :disabled="actionsDisabled || !entry.turn_number"
           @click="$emit('regenerate', entry)"
         >
           <RotateCcw :size="14" />
@@ -124,7 +126,8 @@ const props = defineProps({
   latest: { type: Object, default: null },
   mode: { type: String, default: 'narration' },
   characters: { type: Array, default: () => [] },
-  protagonistName: { type: String, default: '你' }
+  protagonistName: { type: String, default: '你' },
+  actionsDisabled: { type: Boolean, default: false }
 })
 
 defineEmits(['delete-from', 'regenerate'])

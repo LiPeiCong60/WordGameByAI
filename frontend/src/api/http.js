@@ -6,9 +6,25 @@ export const api = axios.create({
 
 export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api'
 
+export function authHeaders() {
+  const token = localStorage.getItem('authToken')
+  return token ? { Authorization: `Bearer ${token}` } : {}
+}
+
+api.interceptors.request.use((config) => {
+  config.headers = { ...(config.headers || {}), ...authHeaders() }
+  return config
+})
+
 api.interceptors.response.use(
   (response) => response.data,
-  (error) => Promise.reject(error)
+  (error) => {
+    if (error?.response?.status === 401) {
+      localStorage.removeItem('authToken')
+      localStorage.removeItem('authUser')
+    }
+    return Promise.reject(error)
+  }
 )
 
 export const apiGet = (url, config) => api.get(url, config)

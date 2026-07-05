@@ -7,13 +7,8 @@ from prompt_builder import build_patch_messages
 
 EMPTY_PATCH = {
     "current_state_update": "",
-    "new_events": [],
     "new_characters": [],
-    "ambient_characters": [],
     "updated_characters": [],
-    "new_items": [],
-    "updated_items": [],
-    "inventory_updates": [],
     "updated_story_world": {},
     "player_choices": [],
 }

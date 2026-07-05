@@ -22,6 +22,44 @@ class GameCreate(FlexibleModel):
     current_story_world_id: Optional[int] = None
 
 
+class CaptchaResponse(FlexibleModel):
+    captcha_id: str
+    svg: str
+    expires_in: int = 600
+
+
+class RegisterRequest(FlexibleModel):
+    username: str
+    password: str
+    email: str = ""
+    captcha_id: str
+    captcha_answer: str
+
+
+class LoginRequest(FlexibleModel):
+    username: str
+    password: str
+
+
+class AuthUserResponse(FlexibleModel):
+    id: int
+    username: str
+    email: str = ""
+    is_admin: bool = False
+
+
+class AuthTokenResponse(FlexibleModel):
+    token: str
+    token_type: str = "bearer"
+    expires_at: str
+    user: AuthUserResponse
+
+
+class AdminUserUpdate(FlexibleModel):
+    is_admin: Optional[bool] = None
+    is_active: Optional[bool] = None
+
+
 class GameUpdate(FlexibleModel):
     title: Optional[str] = None
     genre: Optional[str] = None
@@ -114,6 +152,9 @@ class CharacterCreate(FlexibleModel):
     mood: str = ""
     relationship_to_player: str = ""
     relationship_score: int = 0
+    affection_score: int = 0
+    trust_score: int = 0
+    tension_score: int = 0
     current_goal: str = ""
     hidden_goal: str = ""
     memory_summary: str = ""
@@ -137,128 +178,13 @@ class CharacterUpdate(FlexibleModel):
     mood: Optional[str] = None
     relationship_to_player: Optional[str] = None
     relationship_score: Optional[int] = None
+    affection_score: Optional[int] = None
+    trust_score: Optional[int] = None
+    tension_score: Optional[int] = None
     current_goal: Optional[str] = None
     hidden_goal: Optional[str] = None
     memory_summary: Optional[str] = None
     agent_enabled: Optional[bool] = None
-    extra_attrs: Optional[str] = None
-
-
-class ItemCreate(FlexibleModel):
-    name: str
-    item_type: str = "普通物品"
-    description: str = ""
-    status: str = "normal"
-    rarity: str = "common"
-    quantity_limit: int = 99
-    is_stackable: bool = True
-    is_equippable: bool = False
-    is_consumable: bool = False
-    is_key_item: bool = False
-    is_tradeable: bool = True
-    is_unique: bool = False
-    usable_condition: str = ""
-    effect_description: str = ""
-    current_location: str = ""
-    importance: int = 5
-    extra_attrs: str = "{}"
-
-
-class ItemUpdate(FlexibleModel):
-    name: Optional[str] = None
-    item_type: Optional[str] = None
-    description: Optional[str] = None
-    status: Optional[str] = None
-    rarity: Optional[str] = None
-    quantity_limit: Optional[int] = None
-    is_stackable: Optional[bool] = None
-    is_equippable: Optional[bool] = None
-    is_consumable: Optional[bool] = None
-    is_key_item: Optional[bool] = None
-    is_tradeable: Optional[bool] = None
-    is_unique: Optional[bool] = None
-    usable_condition: Optional[str] = None
-    effect_description: Optional[str] = None
-    current_location: Optional[str] = None
-    importance: Optional[int] = None
-    extra_attrs: Optional[str] = None
-
-
-class InventoryCreate(FlexibleModel):
-    item_id: int
-    owner_type: str = "character"
-    owner_id: Optional[int] = None
-    owner_name: str = ""
-    quantity: int = 1
-    equipped: bool = False
-    storage_location: str = ""
-    item_state: str = "normal"
-    note: str = ""
-
-
-class InventoryUpdate(FlexibleModel):
-    item_id: Optional[int] = None
-    owner_type: Optional[str] = None
-    owner_id: Optional[int] = None
-    owner_name: Optional[str] = None
-    quantity: Optional[int] = None
-    equipped: Optional[bool] = None
-    storage_location: Optional[str] = None
-    item_state: Optional[str] = None
-    note: Optional[str] = None
-
-
-class TransferRequest(FlexibleModel):
-    game_id: int
-    item_id: int
-    from_owner_type: str = "character"
-    from_owner_id: Optional[int] = None
-    from_owner_name: str = ""
-    to_owner_type: str = "character"
-    to_owner_id: Optional[int] = None
-    to_owner_name: str = ""
-    quantity: int = 1
-
-
-class UseItemRequest(FlexibleModel):
-    game_id: int
-    character_id: int
-    item_id: int
-    quantity: int = 1
-    context: Optional[str] = None
-
-
-class EquipItemRequest(FlexibleModel):
-    game_id: int
-    character_id: int
-    item_id: int
-
-
-class EventCreate(FlexibleModel):
-    title: str
-    event_type: str = "背景事件"
-    arc_name: str = ""
-    related_world: str = ""
-    summary: str = ""
-    location: str = ""
-    participants: str = ""
-    consequence: str = ""
-    status: str = "active"
-    importance: int = 5
-    extra_attrs: str = "{}"
-
-
-class EventUpdate(FlexibleModel):
-    title: Optional[str] = None
-    event_type: Optional[str] = None
-    arc_name: Optional[str] = None
-    related_world: Optional[str] = None
-    summary: Optional[str] = None
-    location: Optional[str] = None
-    participants: Optional[str] = None
-    consequence: Optional[str] = None
-    status: Optional[str] = None
-    importance: Optional[int] = None
     extra_attrs: Optional[str] = None
 
 
@@ -268,6 +194,8 @@ class TurnRequest(FlexibleModel):
     dialogue_input: str = ""
     auto_complete_blank: bool = True
     fast_mode: bool = False
+    skip_state_update: bool = False
+    async_state_update: bool = False
 
     def effective_user_input(self) -> str:
         action = (self.action_input or "").strip()
@@ -314,9 +242,6 @@ class ImportPayload(FlexibleModel):
     story_worlds: list[dict[str, Any]] = Field(default_factory=list)
     world_lore: list[dict[str, Any]] = Field(default_factory=list)
     characters: list[dict[str, Any]] = Field(default_factory=list)
-    items: list[dict[str, Any]] = Field(default_factory=list)
-    inventory_records: list[dict[str, Any]] = Field(default_factory=list)
-    world_events: list[dict[str, Any]] = Field(default_factory=list)
     turn_logs: list[dict[str, Any]] = Field(default_factory=list)
     rag_memories: list[dict[str, Any]] = Field(default_factory=list)
     management_sessions: list[dict[str, Any]] = Field(default_factory=list)

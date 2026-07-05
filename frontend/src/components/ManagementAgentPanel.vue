@@ -18,29 +18,48 @@
         <option v-for="option in scopes" :key="option.value" :value="option.value">{{ option.label }}</option>
       </select>
     </div>
-    <textarea :value="message" rows="4" placeholder="描述你想调整的存档、角色、物品、库存、世界、设定、事件或状态" @input="$emit('update:message', $event.target.value)" />
-    <button type="button" class="primary" @click="$emit('send')">
-      <Send :size="17" />
-      发送
-    </button>
-    <article v-if="reply" class="proposal-card">
-      <h3>回复</h3>
-      <p>{{ reply }}</p>
-    </article>
-    <article v-if="proposal" class="proposal-card">
-      <h3>修改方案 #{{ proposal.proposal_id }}</h3>
-      <pre>{{ JSON.stringify(proposal.proposed_actions, null, 2) }}</pre>
-      <div class="button-row">
-        <button type="button" class="primary" @click="$emit('apply', proposal.proposal_id)">
-          <Check :size="17" />
-          确认执行
-        </button>
-        <button type="button" @click="$emit('reject', proposal.proposal_id)">
-          <X :size="17" />
-          拒绝
-        </button>
-      </div>
-    </article>
+    <div v-if="messages.length || pending" class="agent-thread" aria-live="polite">
+      <article v-for="item in messages" :key="item.id" class="chat-message" :class="`chat-message--${item.role}`">
+        <div class="chat-bubble">
+          <header class="chat-meta">
+            <span>{{ roleLabel(item.role) }}</span>
+            <small v-if="item.scope">{{ item.scope }}</small>
+          </header>
+          <p v-if="item.text">{{ item.text }}</p>
+          <div v-if="item.proposal" class="chat-attachment">
+            <h3>修改方案 #{{ item.proposal.proposal_id }}</h3>
+            <pre>{{ JSON.stringify(item.proposal.proposed_actions, null, 2) }}</pre>
+            <div class="button-row">
+              <button type="button" class="primary" @click="$emit('apply', item.proposal.proposal_id)">
+                <Check :size="17" />
+                确认执行
+              </button>
+              <button type="button" @click="$emit('reject', item.proposal.proposal_id)">
+                <X :size="17" />
+                拒绝
+              </button>
+            </div>
+          </div>
+          <div v-if="item.result" class="chat-attachment">
+            <h3>执行结果</h3>
+            <pre>{{ JSON.stringify(item.result, null, 2) }}</pre>
+          </div>
+        </div>
+      </article>
+      <article v-if="pending" class="chat-message chat-message--assistant">
+        <div class="chat-bubble">
+          <header class="chat-meta"><span>智能体</span></header>
+          <p>正在整理回复...</p>
+        </div>
+      </article>
+    </div>
+    <form class="agent-composer" @submit.prevent="$emit('send')">
+      <textarea :value="message" rows="4" placeholder="描述你想调整的存档、角色、世界、设定或状态" @input="$emit('update:message', $event.target.value)" />
+      <button type="submit" class="primary" :disabled="!message.trim() || pending">
+        <Send :size="17" />
+        发送
+      </button>
+    </form>
   </section>
 </template>
 
@@ -53,9 +72,15 @@ defineProps({
   scope: { type: String, default: '综合管理' },
   sessionId: { type: Number, default: 0 },
   message: { type: String, default: '' },
-  reply: { type: String, default: '' },
-  proposal: { type: Object, default: null }
+  messages: { type: Array, default: () => [] },
+  pending: { type: Boolean, default: false }
 })
 
 defineEmits(['create-session', 'update:sessionId', 'update:scope', 'update:message', 'send', 'apply', 'reject'])
+
+function roleLabel(role) {
+  if (role === 'user') return '你'
+  if (role === 'status') return '状态'
+  return '智能体'
+}
 </script>

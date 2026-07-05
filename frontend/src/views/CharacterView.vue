@@ -31,7 +31,10 @@
         <label class="field"><span>状态</span><select v-model="form.status"><option v-for="option in characterStatusOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select></label>
         <label class="field"><span>心情</span><input v-model="form.mood" /></label>
         <label class="field"><span>与主角关系</span><input v-model="form.relationship_to_player" /></label>
-        <label class="field"><span>关系值</span><input v-model.number="form.relationship_score" type="number" /></label>
+        <label class="field"><span>关系值</span><input v-model.number="form.relationship_score" type="number" min="-100" max="100" /></label>
+        <label class="field"><span>好感度</span><input v-model.number="form.affection_score" type="number" min="0" max="100" /></label>
+        <label class="field"><span>信任度</span><input v-model.number="form.trust_score" type="number" min="0" max="100" /></label>
+        <label class="field"><span>张力</span><input v-model.number="form.tension_score" type="number" min="0" max="100" /></label>
         <label class="field wide"><span>外貌</span><textarea v-model="form.appearance" rows="3" /></label>
         <label class="field wide"><span>性格</span><textarea v-model="form.personality" rows="3" /></label>
         <label class="field wide"><span>说话风格</span><textarea v-model="form.speech_style" rows="3" /></label>
@@ -50,7 +53,6 @@
         <button type="button" @click="reset"><RotateCcw :size="17" />重置</button>
         <button v-if="form.id" type="button" @click="remove(form.id)"><Trash2 :size="17" />删除</button>
       </form>
-      <InventoryPanel v-if="form.id" title="角色库存" :records="characterInventory" :items="items" />
     </div>
     <SectionAgentPanel
       v-if="!embedded"
@@ -64,17 +66,14 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
+import { onMounted, reactive, ref } from 'vue'
 import { RefreshCw, RotateCcw, Save, Trash2, Upload } from 'lucide-vue-next'
 import CharacterCard from '../components/CharacterCard.vue'
-import InventoryPanel from '../components/InventoryPanel.vue'
 import JsonEditor from '../components/JsonEditor.vue'
 import NoGamePrompt from '../components/NoGamePrompt.vue'
 import SaveContextBar from '../components/SaveContextBar.vue'
 import SectionAgentPanel from '../components/SectionAgentPanel.vue'
 import { createCharacter, deleteCharacter, listCharacters, uploadAvatar, updateCharacter } from '../api/characters'
-import { listInventory } from '../api/inventory'
-import { listItems } from '../api/items'
 import { useGameStore } from '../stores/gameStore'
 import { useUiStore } from '../stores/uiStore'
 import { characterStatusLabels, optionsFrom, roleTypeLabels } from '../utils/labels'
@@ -86,8 +85,6 @@ defineProps({
   embedded: { type: Boolean, default: false }
 })
 const characters = ref([])
-const inventory = ref([])
-const items = ref([])
 const autoCreated = ref(false)
 const roleTypeOptions = optionsFrom(roleTypeLabels)
 const characterStatusOptions = optionsFrom(characterStatusLabels)
@@ -108,6 +105,9 @@ const blank = () => ({
   mood: '',
   relationship_to_player: '',
   relationship_score: 0,
+  affection_score: 0,
+  trust_score: 0,
+  tension_score: 0,
   current_goal: '',
   hidden_goal: '',
   memory_summary: '',
@@ -115,7 +115,6 @@ const blank = () => ({
   extra_attrs: '{}'
 })
 const form = reactive(blank())
-const characterInventory = computed(() => inventory.value.filter((row) => row.owner_type === 'character' && row.owner_id === form.id))
 
 function reset() {
   Object.assign(form, blank())
@@ -132,8 +131,6 @@ async function load() {
     const starterResult = await ensureStarterCharacters(gameStore.currentGameId, gameStore.currentGame)
     autoCreated.value = starterResult.created
     characters.value = starterResult.created ? await listCharacters(gameStore.currentGameId) : starterResult.characters
-    items.value = await listItems(gameStore.currentGameId)
-    inventory.value = await listInventory(gameStore.currentGameId)
   })
 }
 

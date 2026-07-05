@@ -6,31 +6,25 @@ from sqlmodel import Session, SQLModel, select
 from models import (
     Character,
     Game,
-    InventoryRecord,
-    Item,
     ManagementProposal,
     ManagementSession,
     RagMemory,
     StoryWorld,
     TurnLog,
     TurnSnapshot,
-    WorldEvent,
     WorldLore,
 )
 
 
 RELATED_GAME_MODELS: tuple[type[SQLModel], ...] = (
-    InventoryRecord,
     TurnSnapshot,
     TurnLog,
     RagMemory,
     ManagementProposal,
     ManagementSession,
     Character,
-    Item,
     StoryWorld,
     WorldLore,
-    WorldEvent,
 )
 
 
@@ -50,7 +44,11 @@ def delete_orphaned_game_records(session: Session) -> dict[str, int]:
     game_ids = {game.id for game in session.exec(select(Game)).all() if game.id is not None}
     deleted: dict[str, int] = {}
     for model in RELATED_GAME_MODELS:
-        records = [record for record in session.exec(select(model)).all() if record.game_id not in game_ids]
+        records = [
+            record
+            for record in session.exec(select(model)).all()
+            if record.game_id not in game_ids and not (model in (ManagementProposal, ManagementSession) and record.game_id == 0)
+        ]
         deleted[model.__name__] = len(records)
         for record in records:
             session.delete(record)

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 import unittest
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from sqlalchemy.pool import StaticPool
@@ -12,12 +13,19 @@ BACKEND = ROOT / "backend"
 sys.path.insert(0, str(BACKEND))
 
 import game_engine
+import routers.management as management_router
+import routers.templates as templates_router
+from database import DEFAULT_TEMPLATES, normalize_template_character_fields
+from auth_service import _sha256, login_user, register_user
 from agents.protagonist_agent import run_protagonist_fallback
-from models import Character, Game, RagMemory, TurnLog, WorldEvent, WorldLore
+from json_utils import parse_json_field
+from models import CaptchaChallenge, Character, Game, RagMemory, TurnLog, User, WorldLore, WorldTemplate
 from patch_applier import apply_state_patch
 from rag_service import retrieve_related_memories, store_turn_memory
 from routers.rag import rebuild_game_rag, search_rag_memories
-from schemas import RagSearchRequest, TurnRequest
+from schemas import ManagementChatRequest, ManagementSessionCreate, RagSearchRequest, TemplateCreate, TemplateUpdate, TurnRequest
+from starter_character_service import CHARACTER_FIELDS
+from turn_history_service import delete_turns_from
 
 
 def make_session() -> Session:
@@ -69,21 +77,124 @@ def seed_game(db: Session) -> Game:
             agent_enabled=True,
         )
     )
-    db.add(
-        WorldEvent(
-            game_id=game.id,
-            title="雨夜误会",
-            event_type="关系事件",
-            summary="主角曾在雨夜迟到，许晚因此误会他不重视约定。",
-            participants="程予安,许晚",
-            importance=8,
-        )
-    )
     db.commit()
     return game
 
 
+def test_user() -> User:
+    return User(id=1, username="tester", is_admin=True)
+
+
 class DynamicRagTests(unittest.TestCase):
+    def test_register_first_user_with_captcha_becomes_admin_and_can_login(self) -> None:
+        with make_session() as db:
+            captcha = CaptchaChallenge(
+                id="captcha-test",
+                answer_hash=_sha256("12"),
+                expires_at=datetime.utcnow() + timedelta(minutes=5),
+            )
+            db.add(captcha)
+            db.commit()
+
+            session = register_user(db, "admin_test", "password123", "admin@example.com", "captcha-test", "12")
+            self.assertTrue(session["user"]["is_admin"])
+            self.assertTrue(session["token"])
+
+            login_session = login_user(db, "admin_test", "password123")
+            self.assertEqual(login_session["user"]["username"], "admin_test")
+
+    def test_template_management_routes_allow_global_admin_session(self) -> None:
+        with make_session() as db:
+            admin = test_user()
+            created = management_router.create_session(0, ManagementSessionCreate(title="模板测试"), db, admin)
+            self.assertEqual(created.game_id, 0)
+            self.assertEqual(created.owner_user_id, admin.id)
+
+            sessions = management_router.list_sessions(0, db, admin)
+            self.assertEqual(len(sessions), 1)
+
+            original_chat = management_router.run_management_chat
+            try:
+                management_router.run_management_chat = lambda session_id, message, db, scope, user: {
+                    "reply": "模板方案已生成。",
+                    "proposal_id": 1,
+                    "proposed_actions": [],
+                    "requires_confirmation": False,
+                }
+                result = management_router.chat(created.id, ManagementChatRequest(message="补全模板", scope="模板"), db, admin)
+            finally:
+                management_router.run_management_chat = original_chat
+
+            self.assertEqual(result["reply"], "模板方案已生成。")
+
+            normal_user = User(id=2, username="normal", is_admin=False)
+            normal_session = management_router.create_session(0, ManagementSessionCreate(title="我的模板测试"), db, normal_user)
+            self.assertEqual(normal_session.owner_user_id, normal_user.id)
+            normal_sessions = management_router.list_sessions(0, db, normal_user)
+            self.assertEqual([item.id for item in normal_sessions], [normal_session.id])
+
+            other_user = User(id=3, username="other", is_admin=False)
+            with self.assertRaises(Exception) as raised:
+                management_router.get_session_record(normal_session.id, db, other_user)
+            self.assertEqual(getattr(raised.exception, "status_code", None), 403)
+
+    def test_templates_are_public_for_admin_and_private_for_normal_users(self) -> None:
+        with make_session() as db:
+            admin = test_user()
+            normal = User(id=2, username="normal", is_admin=False)
+            other = User(id=3, username="other", is_admin=False)
+
+            public_template = templates_router.create_template(TemplateCreate(name="公共奇幻", genre="奇幻"), db, admin)
+            own_template = templates_router.create_template(TemplateCreate(name="我的校园", genre="校园"), db, normal)
+            other_template = templates_router.create_template(TemplateCreate(name="别人末日", genre="末日"), db, other)
+
+            self.assertIsNone(public_template.owner_user_id)
+            self.assertEqual(own_template.owner_user_id, normal.id)
+            self.assertEqual(other_template.owner_user_id, other.id)
+
+            visible_names = {template.name for template in templates_router.list_templates(db, normal)}
+            self.assertIn("公共奇幻", visible_names)
+            self.assertIn("我的校园", visible_names)
+            self.assertNotIn("别人末日", visible_names)
+
+            with self.assertRaises(Exception) as raised:
+                templates_router.update_template(public_template.id, TemplateUpdate(tone="暗黑"), db, normal)
+            self.assertEqual(getattr(raised.exception, "status_code", None), 403)
+
+            updated = templates_router.update_template(own_template.id, TemplateUpdate(tone="轻松"), db, normal)
+            self.assertEqual(updated.tone, "轻松")
+
+    def test_default_templates_include_all_starter_character_fields(self) -> None:
+        for template in DEFAULT_TEMPLATES:
+            payload = parse_json_field(template["default_character_fields"], default={})
+            characters = payload.get("characters", [])
+            self.assertTrue(characters, template["name"])
+            for character in characters:
+                missing = CHARACTER_FIELDS - set(character)
+                self.assertFalse(missing, f"{template['name']} / {character.get('name')} missing {sorted(missing)}")
+                self.assertTrue(character.get("appearance"), f"{template['name']} / {character.get('name')} missing appearance text")
+
+    def test_existing_templates_are_backfilled_with_missing_character_fields(self) -> None:
+        with make_session() as db:
+            template = WorldTemplate(
+                name="缺字段模板",
+                genre="测试",
+                owner_user_id=2,
+                default_character_fields='{"characters":[{"name":"林晚","role_type":"npc"}]}',
+            )
+            db.add(template)
+            db.commit()
+
+            normalize_template_character_fields(db)
+
+            refreshed = db.get(WorldTemplate, template.id)
+            payload = parse_json_field(refreshed.default_character_fields, default={})
+            character = payload["characters"][0]
+            missing = CHARACTER_FIELDS - set(character)
+            self.assertFalse(missing)
+            self.assertEqual(character["name"], "林晚")
+            self.assertEqual(refreshed.owner_user_id, 2)
+
     def test_static_game_context_is_indexed_and_retrieved(self) -> None:
         with make_session() as db:
             game = seed_game(db)
@@ -142,13 +253,8 @@ class DynamicRagTests(unittest.TestCase):
                 game_engine.run_narrator_agent = fake_narrator
                 game_engine.run_patch_agent = lambda context, user_input, npc_reactions, visible_story: {
                     "current_state_update": "许晚提起银月城雨夜约定",
-                    "new_events": [],
                     "new_characters": [],
-                    "ambient_characters": [],
                     "updated_characters": [{"name": "许晚", "relationship_score": 40}],
-                    "new_items": [],
-                    "updated_items": [],
-                    "inventory_updates": [],
                     "updated_story_world": {},
                     "player_choices": [],
                 }
@@ -196,13 +302,8 @@ class DynamicRagTests(unittest.TestCase):
                 game_engine.run_narrator_agent = fake_narrator
                 game_engine.run_patch_agent = lambda context, user_input, npc_reactions, visible_story: {
                     "current_state_update": "快速模式生成完成",
-                    "new_events": [],
                     "new_characters": [],
-                    "ambient_characters": [],
                     "updated_characters": [],
-                    "new_items": [],
-                    "updated_items": [],
-                    "inventory_updates": [],
                     "updated_story_world": {},
                     "player_choices": [],
                 }
@@ -220,6 +321,234 @@ class DynamicRagTests(unittest.TestCase):
             self.assertEqual(called["npc"], 0)
             self.assertEqual(called["narrator"], 1)
             self.assertTrue(result["fast_mode"])
+
+    def test_skip_state_update_finishes_without_patch_and_checker(self) -> None:
+        with make_session() as db:
+            game = seed_game(db)
+            called = {"patch": 0, "checker": 0, "narrator": 0}
+
+            original_narrator = game_engine.run_narrator_agent
+            original_patch = game_engine.run_patch_agent
+            original_checker = game_engine.run_checker_agent
+            try:
+                def fake_narrator(context, user_input, protagonist_turn, npc_reactions):
+                    called["narrator"] += 1
+                    return {
+                        "visible_story": "许晚抬眼看你，语气比刚才轻了一点。",
+                        "state_hint": {
+                            "current_state_update": "当前时间:傍晚；当前位置:商场三楼蔚蓝女装店前；当前状况:许晚接过热可可，气氛稍微缓和。",
+                            "updated_characters": [
+                                {
+                                    "name": "许晚",
+                                    "mood": "稍微缓和",
+                                    "current_location": "商场三楼蔚蓝女装店前",
+                                    "affection_score_delta": 5,
+                                    "trust_score_delta": 3,
+                                }
+                            ],
+                        },
+                    }
+
+                def fail_patch(context, user_input, npc_reactions, visible_story):
+                    called["patch"] += 1
+                    raise AssertionError("skip_state_update should not call PatchAgent")
+
+                def fail_checker(context, visible_story, state_patch):
+                    called["checker"] += 1
+                    raise AssertionError("skip_state_update should not call CheckerAgent")
+
+                game_engine.run_narrator_agent = fake_narrator
+                game_engine.run_patch_agent = fail_patch
+                game_engine.run_checker_agent = fail_checker
+
+                result = game_engine.run_game_turn(
+                    game.id,
+                    "我向许晚递过去一杯热可可",
+                    db,
+                    fast_mode=True,
+                    skip_state_update=True,
+                )
+            finally:
+                game_engine.run_narrator_agent = original_narrator
+                game_engine.run_patch_agent = original_patch
+                game_engine.run_checker_agent = original_checker
+
+            self.assertEqual(called["narrator"], 1)
+            self.assertEqual(called["patch"], 0)
+            self.assertEqual(called["checker"], 0)
+            self.assertTrue(result["fast_mode"])
+            self.assertTrue(result["skip_state_update"])
+            self.assertTrue(result["checker_result"]["skipped"])
+            self.assertTrue(result["checker_result"]["state_hint_applied"])
+            self.assertIn("当前时间:傍晚", result["state_patch"]["current_state_update"])
+            self.assertEqual(result["state_patch"]["updated_characters"][0]["mood"], "稍微缓和")
+            self.assertEqual(result["state_patch"]["updated_characters"][0]["current_location"], "商场三楼蔚蓝女装店前")
+            refreshed_npc = db.exec(select(Character).where(Character.game_id == game.id, Character.name == "许晚")).one()
+            self.assertEqual(refreshed_npc.mood, "稍微缓和")
+            self.assertEqual(refreshed_npc.current_location, "商场三楼蔚蓝女装店前")
+            self.assertEqual(refreshed_npc.affection_score, 5)
+            self.assertEqual(refreshed_npc.trust_score, 3)
+            refreshed_game = db.get(Game, game.id)
+            self.assertIn("当前时间:傍晚", refreshed_game.current_state)
+            self.assertEqual(len(db.exec(select(TurnLog).where(TurnLog.game_id == game.id)).all()), 1)
+
+    def test_async_state_update_returns_pending_without_blocking_patch_and_checker(self) -> None:
+        with make_session() as db:
+            game = seed_game(db)
+            called = {"patch": 0, "checker": 0, "scheduled": 0}
+
+            original_narrator = game_engine.run_narrator_agent
+            original_patch = game_engine.run_patch_agent
+            original_checker = game_engine.run_checker_agent
+            original_schedule = game_engine._schedule_async_state_update
+            try:
+                game_engine.run_narrator_agent = lambda context, user_input, protagonist_turn, npc_reactions: {
+                    "visible_story": "许晚接过热可可，没有立刻移开视线。"
+                }
+
+                def fail_patch(context, user_input, npc_reactions, visible_story):
+                    called["patch"] += 1
+                    raise AssertionError("async_state_update should not block on PatchAgent")
+
+                def fail_checker(context, visible_story, state_patch):
+                    called["checker"] += 1
+                    raise AssertionError("async_state_update should not block on CheckerAgent")
+
+                def fake_schedule(game_id, turn_id, context, user_input, npc_reactions, visible_story):
+                    called["scheduled"] += 1
+
+                game_engine.run_patch_agent = fail_patch
+                game_engine.run_checker_agent = fail_checker
+                game_engine._schedule_async_state_update = fake_schedule
+
+                result = game_engine.run_game_turn(
+                    game.id,
+                    "我递给许晚一杯热可可",
+                    db,
+                    fast_mode=True,
+                    async_state_update=True,
+                )
+            finally:
+                game_engine.run_narrator_agent = original_narrator
+                game_engine.run_patch_agent = original_patch
+                game_engine.run_checker_agent = original_checker
+                game_engine._schedule_async_state_update = original_schedule
+
+            self.assertEqual(called["patch"], 0)
+            self.assertEqual(called["checker"], 0)
+            self.assertEqual(called["scheduled"], 1)
+            self.assertTrue(result["async_state_update"])
+            self.assertTrue(result["checker_result"]["pending"])
+
+            turn = db.exec(select(TurnLog).where(TurnLog.game_id == game.id)).one()
+            checker_result = parse_json_field(turn.checker_result, default={})
+            self.assertTrue(checker_result["pending"])
+
+    def test_state_hint_applies_soft_character_state_immediately(self) -> None:
+        with make_session() as db:
+            game = seed_game(db)
+            npc = db.exec(select(Character).where(Character.game_id == game.id, Character.name == "许晚")).one()
+            npc.relationship_score = 35
+            npc.affection_score = 50
+            npc.trust_score = 20
+            npc.tension_score = 30
+            db.add(npc)
+            db.commit()
+
+            patch = game_engine._apply_state_hint(
+                game.id,
+                {
+                    "updated_characters": [
+                        {
+                            "name": "许晚",
+                            "mood": "稍微缓和",
+                            "current_location": "校门口",
+                            "relationship_score_delta": 99,
+                            "affection_score_delta": 6,
+                            "trust_score_delta": -99,
+                            "tension_score_delta": 4,
+                        }
+                    ]
+                },
+                db,
+            )
+
+            refreshed_npc = db.exec(select(Character).where(Character.game_id == game.id, Character.name == "许晚")).one()
+            self.assertEqual(refreshed_npc.mood, "稍微缓和")
+            self.assertEqual(refreshed_npc.current_location, "校门口")
+            self.assertEqual(refreshed_npc.relationship_score, 45)
+            self.assertEqual(refreshed_npc.affection_score, 56)
+            self.assertEqual(refreshed_npc.trust_score, 10)
+            self.assertEqual(refreshed_npc.tension_score, 34)
+            self.assertTrue(patch["state_hint"])
+            self.assertEqual(patch["updated_characters"][0]["relationship_score"], 45)
+
+    def test_stream_state_hint_tag_is_hidden_from_visible_story(self) -> None:
+        hint_box = {}
+        chunks = list(
+            game_engine._iter_visible_chunks_with_hint(
+                [
+                    "许晚看着你，声音低了一点。",
+                    "<STATE_HINT>{\"updated_characters\":[{\"name\":\"许晚\",\"affection_score_delta\":4}]}",
+                    "</STATE_HINT>",
+                ],
+                hint_box,
+            )
+        )
+
+        self.assertEqual("".join(chunks), "许晚看着你，声音低了一点。")
+        self.assertEqual(hint_box["state_hint"]["updated_characters"][0]["name"], "许晚")
+
+    def test_async_state_update_finalize_applies_real_patch(self) -> None:
+        with make_session() as db:
+            game = seed_game(db)
+            turn = TurnLog(
+                game_id=game.id,
+                turn_number=1,
+                user_input="我认真道歉。",
+                ai_response="许晚沉默片刻，终于点了点头。",
+                npc_reactions="{}",
+                state_patch="{}",
+                checker_result='{"pending": true}',
+            )
+            db.add(turn)
+            db.commit()
+            db.refresh(turn)
+
+            original_patch = game_engine.run_patch_agent
+            original_checker = game_engine.run_checker_agent
+            try:
+                game_engine.run_patch_agent = lambda context, user_input, npc_reactions, visible_story: {
+                    "current_state_update": "许晚开始重新考虑主角的解释",
+                    "new_characters": [],
+                    "updated_characters": [{"name": "许晚", "relationship_score": 45, "affection_score": 55}],
+                    "updated_story_world": {},
+                    "player_choices": [],
+                }
+                game_engine.run_checker_agent = lambda context, visible_story, state_patch: {"ok": True, "issues": []}
+
+                result = game_engine._finalize_async_state_update(
+                    game.id,
+                    turn.id,
+                    game_engine.load_game_context(game.id, db),
+                    "我认真道歉。",
+                    {"reactions": []},
+                    "许晚沉默片刻，终于点了点头。",
+                    db,
+                )
+            finally:
+                game_engine.run_patch_agent = original_patch
+                game_engine.run_checker_agent = original_checker
+
+            self.assertIsNotNone(result)
+            refreshed_turn = db.get(TurnLog, turn.id)
+            checker_result = parse_json_field(refreshed_turn.checker_result, default={})
+            self.assertFalse(checker_result["pending"])
+            self.assertTrue(checker_result["async_state_update"])
+
+            refreshed_npc = db.exec(select(Character).where(Character.game_id == game.id, Character.name == "许晚")).one()
+            self.assertEqual(refreshed_npc.relationship_score, 45)
+            self.assertEqual(refreshed_npc.affection_score, 55)
 
     def test_structured_turn_request_keeps_action_and_dialogue_separate(self) -> None:
         payload = TurnRequest(
@@ -253,10 +582,11 @@ class DynamicRagTests(unittest.TestCase):
     def test_rag_router_rebuild_and_search(self) -> None:
         with make_session() as db:
             game = seed_game(db)
-            rebuild_result = rebuild_game_rag(game.id, db)
+            user = test_user()
+            rebuild_result = rebuild_game_rag(game.id, db, user)
             self.assertTrue(rebuild_result["ok"])
 
-            result = search_rag_memories(game.id, RagSearchRequest(query="许晚 雨夜 约定", top_k=4), db)
+            result = search_rag_memories(game.id, RagSearchRequest(query="许晚 雨夜 约定", top_k=4), db, user)
             self.assertTrue(result["items"])
             self.assertTrue(any("许晚" in item["content"] or "许晚" in item["title"] for item in result["items"]))
 
@@ -266,14 +596,6 @@ class DynamicRagTests(unittest.TestCase):
             result = apply_state_patch(
                 game.id,
                 {
-                    "new_events": [
-                        {
-                            "title": "模型语义重要度",
-                            "event_type": "agreement",
-                            "summary": "模型把重要度写成 normal。",
-                            "importance": "normal",
-                        }
-                    ],
                     "updated_characters": [{"name": "许晚", "relationship_score": "high"}],
                     "updated_story_world": {},
                 },
@@ -281,10 +603,23 @@ class DynamicRagTests(unittest.TestCase):
             )
 
             self.assertTrue(result["ok"])
-            event = db.exec(select(WorldEvent).where(WorldEvent.game_id == game.id, WorldEvent.title == "模型语义重要度")).first()
             character = db.exec(select(Character).where(Character.game_id == game.id, Character.name == "许晚")).first()
-            self.assertEqual(event.importance, 5)
             self.assertEqual(character.relationship_score, 8)
+
+    def test_turn_actions_fallback_to_game_and_turn_number_when_id_is_stale(self) -> None:
+        with make_session() as db:
+            game = seed_game(db)
+            first = TurnLog(game_id=game.id, turn_number=1, user_input="第一轮", ai_response="第一轮剧情")
+            second = TurnLog(game_id=game.id, turn_number=2, user_input="第二轮", ai_response="第二轮剧情")
+            db.add(first)
+            db.add(second)
+            db.commit()
+
+            result = delete_turns_from(9999, db, game_id=game.id, turn_number=1)
+
+            self.assertTrue(result["ok"])
+            remaining = db.exec(select(TurnLog).where(TurnLog.game_id == game.id)).all()
+            self.assertEqual(remaining, [])
 
 
 if __name__ == "__main__":

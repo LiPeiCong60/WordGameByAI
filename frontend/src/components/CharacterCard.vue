@@ -12,6 +12,9 @@
         <div><dt>心情</dt><dd>{{ character.mood || '-' }}</dd></div>
         <div><dt>位置</dt><dd>{{ character.current_location || '-' }}</dd></div>
         <div><dt>关系</dt><dd>{{ character.relationship_to_player || '-' }} · {{ character.relationship_score ?? 0 }}</dd></div>
+        <div><dt>好感</dt><dd>{{ character.affection_score ?? 0 }}</dd></div>
+        <div><dt>信任</dt><dd>{{ character.trust_score ?? 0 }}</dd></div>
+        <div><dt>张力</dt><dd>{{ character.tension_score ?? 0 }}</dd></div>
       </dl>
       <p v-if="character.abilities">{{ character.abilities }}</p>
     </div>

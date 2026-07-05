@@ -6,19 +6,28 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlmodel import Session
 
+from auth_service import get_current_user, require_game_access
 from database import get_session
 from game_engine import run_game_turn, run_game_turn_stream, run_opening_turn, run_opening_turn_stream
-from models import TurnLog
+from models import TurnLog, User
 from schemas import TurnRequest
-from turn_history_service import delete_turns_from, regenerate_turn
+from turn_history_service import delete_turns_from, get_turn_for_action, regenerate_turn
 
 router = APIRouter()
 
 
 @router.post("/games/{game_id}/turn")
-def create_turn(game_id: int, payload: TurnRequest, db: Session = Depends(get_session)):
+def create_turn(game_id: int, payload: TurnRequest, db: Session = Depends(get_session), user: User = Depends(get_current_user)):
+    require_game_access(db, game_id, user)
     try:
-        return run_game_turn(game_id, payload.effective_user_input(), db, fast_mode=payload.fast_mode)
+        return run_game_turn(
+            game_id,
+            payload.effective_user_input(),
+            db,
+            fast_mode=payload.fast_mode,
+            skip_state_update=payload.skip_state_update,
+            async_state_update=payload.async_state_update,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
@@ -34,15 +43,26 @@ def _stream_json_events(events):
 
 
 @router.post("/games/{game_id}/turn/stream")
-def create_turn_stream(game_id: int, payload: TurnRequest, db: Session = Depends(get_session)):
+def create_turn_stream(game_id: int, payload: TurnRequest, db: Session = Depends(get_session), user: User = Depends(get_current_user)):
+    require_game_access(db, game_id, user)
     return StreamingResponse(
-        _stream_json_events(run_game_turn_stream(game_id, payload.effective_user_input(), db, fast_mode=payload.fast_mode)),
+        _stream_json_events(
+            run_game_turn_stream(
+                game_id,
+                payload.effective_user_input(),
+                db,
+                fast_mode=payload.fast_mode,
+                skip_state_update=payload.skip_state_update,
+                async_state_update=payload.async_state_update,
+            )
+        ),
         media_type="application/x-ndjson",
     )
 
 
 @router.post("/games/{game_id}/opening")
-def create_opening(game_id: int, db: Session = Depends(get_session)):
+def create_opening(game_id: int, db: Session = Depends(get_session), user: User = Depends(get_current_user)):
+    require_game_access(db, game_id, user)
     try:
         return run_opening_turn(game_id, db)
     except ValueError as exc:
@@ -50,7 +70,8 @@ def create_opening(game_id: int, db: Session = Depends(get_session)):
 
 
 @router.post("/games/{game_id}/opening/stream")
-def create_opening_stream(game_id: int, db: Session = Depends(get_session)):
+def create_opening_stream(game_id: int, db: Session = Depends(get_session), user: User = Depends(get_current_user)):
+    require_game_access(db, game_id, user)
     return StreamingResponse(
         _stream_json_events(run_opening_turn_stream(game_id, db)),
         media_type="application/x-ndjson",
@@ -58,26 +79,47 @@ def create_opening_stream(game_id: int, db: Session = Depends(get_session)):
 
 
 @router.delete("/turns/{turn_id}/from-here")
-def delete_from_turn(turn_id: int, db: Session = Depends(get_session)):
-    return delete_turns_from(turn_id, db)
+def delete_from_turn(
+    turn_id: int,
+    game_id: int | None = None,
+    turn_number: int | None = None,
+    db: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    turn = get_turn_for_action(turn_id, db, game_id=game_id, turn_number=turn_number)
+    require_game_access(db, turn.game_id, user)
+    return delete_turns_from(turn_id, db, game_id=game_id, turn_number=turn_number)
 
 
 @router.post("/turns/{turn_id}/regenerate")
-def regenerate_existing_turn(turn_id: int, db: Session = Depends(get_session)):
-    return regenerate_turn(turn_id, db)
+def regenerate_existing_turn(
+    turn_id: int,
+    game_id: int | None = None,
+    turn_number: int | None = None,
+    db: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    turn = get_turn_for_action(turn_id, db, game_id=game_id, turn_number=turn_number)
+    require_game_access(db, turn.game_id, user)
+    return regenerate_turn(turn_id, db, game_id=game_id, turn_number=turn_number)
 
 
 @router.post("/turns/{turn_id}/regenerate/stream")
-def regenerate_existing_turn_stream(turn_id: int, db: Session = Depends(get_session)):
-    turn = db.get(TurnLog, turn_id)
-    if not turn:
-        raise HTTPException(status_code=404, detail=f"找不到剧情记录: {turn_id}")
+def regenerate_existing_turn_stream(
+    turn_id: int,
+    game_id: int | None = None,
+    turn_number: int | None = None,
+    db: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    turn = get_turn_for_action(turn_id, db, game_id=game_id, turn_number=turn_number)
+    require_game_access(db, turn.game_id, user)
     game_id = turn.game_id
     user_input = turn.user_input
 
     def events():
         yield {"type": "status", "message": "正在回到这一轮之前..."}
-        delete_turns_from(turn_id, db)
+        delete_turns_from(turn.id, db)
         if user_input:
             yield from run_game_turn_stream(game_id, user_input, db)
         else:
