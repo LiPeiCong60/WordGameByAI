@@ -16,7 +16,7 @@ from export_import import export_game
 from json_utils import dump_json_field, safe_json_loads
 from models import Character, Game, StoryWorld, TurnLog, TurnSnapshot, WorldLore, WorldTemplate
 from numeric_utils import as_int
-from patch_applier import apply_state_patch
+from patch_applier import apply_state_patch, format_state_text
 from rag_service import attach_retrieved_memories, store_turn_memory
 
 STATE_SYNC_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="state-sync")
@@ -141,7 +141,7 @@ def _normalize_state_hint(raw_hint) -> dict:
         characters = []
     return {
         **_empty_state_patch(),
-        "current_state_update": raw_hint.get("current_state_update") or "",
+        "current_state_update": format_state_text(raw_hint.get("current_state_update")),
         "updated_characters": [item for item in characters if isinstance(item, dict)],
         "state_hint": True,
     }
@@ -155,7 +155,7 @@ def _apply_state_hint(game_id: int, raw_hint, session: Session) -> dict:
 
     game = session.get(Game, game_id)
     if game and hint.get("current_state_update"):
-        game.current_state = str(hint["current_state_update"])
+        game.current_state = format_state_text(hint["current_state_update"])
         session.add(game)
         applied["current_state_update"] = game.current_state
 
@@ -177,8 +177,9 @@ def _apply_state_hint(game_id: int, raw_hint, session: Session) -> dict:
         for key in ["status", "mood", "relationship_to_player", "current_goal", "current_location", "memory_summary"]:
             value = item.get(key)
             if value not in (None, ""):
-                setattr(character, key, str(value))
-                applied_item[key] = str(value)
+                text_value = format_state_text(value)
+                setattr(character, key, text_value)
+                applied_item[key] = text_value
 
         numeric_ranges = {
             "relationship_score": (-100, 100),

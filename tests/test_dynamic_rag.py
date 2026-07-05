@@ -699,6 +699,30 @@ class DynamicRagTests(unittest.TestCase):
             character = db.exec(select(Character).where(Character.game_id == game.id, Character.name == "许晚")).first()
             self.assertEqual(character.relationship_score, 8)
 
+    def test_patch_applier_formats_object_state_update(self) -> None:
+        with make_session() as db:
+            game = seed_game(db)
+            result = apply_state_patch(
+                game.id,
+                {
+                    "current_state_update": {
+                        "time": "深夜",
+                        "weather": "暗，无路灯，远处有火光",
+                        "location": "废弃便利店（前门）",
+                        "extra": "卷帘门正在被丧尸冲击，轨道变形",
+                    },
+                    "updated_characters": [],
+                    "updated_story_world": {},
+                },
+                db,
+            )
+
+            self.assertTrue(result["ok"])
+            refreshed = db.get(Game, game.id)
+            self.assertIn("当前时间:深夜", refreshed.current_state)
+            self.assertIn("天气:暗，无路灯，远处有火光", refreshed.current_state)
+            self.assertIn("当前位置:废弃便利店（前门）", refreshed.current_state)
+
     def test_turn_actions_fallback_to_game_and_turn_number_when_id_is_stale(self) -> None:
         with make_session() as db:
             game = seed_game(db)

@@ -202,12 +202,6 @@ function parseRoleSegment(part) {
     if (isLikelySpeaker(speaker)) return { type: 'role', speaker, lines: [explicit[2].trim()] }
   }
 
-  const knownName = characterNames.value.find((name) => part.startsWith(name))
-  if (knownName && part.length > knownName.length + 1) {
-    const content = part.slice(knownName.length).replace(/^[，,：:\s]+/, '').trim()
-    if (content) return { type: 'role', speaker: knownName, lines: [content] }
-  }
-
   return null
 }
 

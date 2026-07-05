@@ -15,6 +15,17 @@ def _touch(record) -> None:
 
 
 AMBIENT_NAME_MARKERS = ("一群", "路人", "群众", "人群", "军人们", "士兵们", "猎户们", "守卫们", "店员们", "围观者")
+STATE_LABELS = {
+    "time": "当前时间",
+    "date": "日期",
+    "weather": "天气",
+    "location": "当前位置",
+    "place": "当前位置",
+    "status": "当前状况",
+    "extra": "当前状况",
+    "scene": "场景",
+    "phase": "阶段",
+}
 
 
 def _truthy(value, default: bool = False) -> bool:
@@ -31,6 +42,23 @@ def _truthy(value, default: bool = False) -> bool:
 
 def _as_int(value, default: int = 0) -> int:
     return as_int(value, default)
+
+
+def format_state_text(value) -> str:
+    if value in (None, ""):
+        return ""
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, dict):
+        parts = []
+        for key, item in value.items():
+            text = format_state_text(item)
+            if text:
+                parts.append(f"{STATE_LABELS.get(str(key), str(key))}:{text}")
+        return "；".join(parts)
+    if isinstance(value, list):
+        return "；".join(text for item in value if (text := format_state_text(item)))
+    return str(value).strip()
 
 
 def _looks_ambient_name(name: str) -> bool:
@@ -52,8 +80,9 @@ def apply_state_patch(game_id: int, state_patch: dict, db: Session) -> dict:
     if not game:
         return {"ok": False, "warnings": [f"找不到游戏: {game_id}"]}
 
-    if state_patch.get("current_state_update"):
-        game.current_state = state_patch["current_state_update"]
+    current_state_update = format_state_text(state_patch.get("current_state_update"))
+    if current_state_update:
+        game.current_state = current_state_update
         _touch(game)
         db.add(game)
 
@@ -124,7 +153,7 @@ def apply_state_patch(game_id: int, state_patch: dict, db: Session) -> dict:
             "memory_summary",
         ]:
             if key in item:
-                setattr(character, key, item[key])
+                setattr(character, key, format_state_text(item[key]))
         if "relationship_score" in item:
             character.relationship_score = _as_int(item.get("relationship_score"), character.relationship_score)
         if "affection_score" in item:
@@ -158,7 +187,7 @@ def apply_state_patch(game_id: int, state_patch: dict, db: Session) -> dict:
                 "failure_condition",
             ]:
                 if key in story_world_patch:
-                    setattr(world, key, story_world_patch[key])
+                    setattr(world, key, format_state_text(story_world_patch[key]))
             if "plot_deviation" in story_world_patch:
                 world.plot_deviation = _as_int(story_world_patch.get("plot_deviation"), world.plot_deviation)
             _touch(world)

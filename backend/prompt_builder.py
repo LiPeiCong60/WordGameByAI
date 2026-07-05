@@ -24,13 +24,14 @@ NARRATIVE_FORMAT_RULES = (
     "2. 角色心理活动单独成段，并用英文小括号 () 包起来，例如：(他意识到自己不能再拖下去。)。"
     "3. 角色说话保持普通对白，格式为 角色名：台词，不加中括号，不加小括号，不加引号。"
     "4. 如果一段里既有动作又有说话，必须拆成两段：先写 [动作/描写]，再写 角色名：台词。"
-    "5. 不要使用项目符号、Markdown、解释文字或格式说明。"
+    "5. 旁白或动作即使以角色名开头，也必须放进 []，例如：[周临的瞳孔骤然收缩。]，不能写成 周临的瞳孔骤然收缩。"
+    "6. 不要使用项目符号、Markdown、解释文字或格式说明。"
 )
 
 STATE_HINT_INSTRUCTIONS = (
     "同时输出用户不可见的 state_hint，只用于即时同步角色软状态。"
     "state_hint 只允许包含 current_state_update 和 updated_characters。"
-    "current_state_update 应用简短自然语言记录本轮后的场景状态；如果时间、地点或场景阶段发生变化，必须写清楚，例如 当前时间:傍晚；当前位置:商场三楼蔚蓝女装店前；当前状况:林晚发来消息。"
+    "current_state_update 必须是简短自然语言字符串，不要输出对象或数组；如果时间、地点或场景阶段发生变化，必须写清楚，例如 当前时间:傍晚；当前位置:商场三楼蔚蓝女装店前；当前状况:林晚发来消息。"
     "updated_characters 每项必须指向已存在角色，使用 name 或 id；只允许字段 status, mood, relationship_to_player, "
     "relationship_score_delta, affection_score_delta, trust_score_delta, tension_score_delta, current_goal, current_location, memory_summary。"
     "如果剧情中角色移动、离开、抵达、打电话、发消息、等待过久、时间推进、气氛改变，必须同步更新相关角色的 current_location 和 mood；没有明确变化才保持不写。"
