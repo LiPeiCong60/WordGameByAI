@@ -22,15 +22,16 @@
             {{ quotaLabel(user) }}
           </em>
           <span>{{ usageLabel(user) }}</span>
+          <span v-if="pendingUserId === user.id">正在保存...</span>
           <label class="compact-field">
             <span>每日上限</span>
-            <input v-model.number="quotaDrafts[user.id]" type="number" min="0" :max="user.is_member ? undefined : 20" />
+            <input v-model.number="quotaDrafts[user.id]" type="number" min="0" />
           </label>
           <div class="inline-actions">
-            <button type="button" @click="toggleUserActive(user)">{{ user.is_active ? '停用' : '启用' }}</button>
-            <button type="button" @click="toggleUserAdmin(user)">{{ user.is_admin ? '取消管理员' : '设为管理员' }}</button>
-            <button type="button" @click="toggleUserMember(user)">{{ user.is_member ? '取消会员' : '设为会员' }}</button>
-            <button type="button" @click="saveUserQuota(user)">保存额度</button>
+            <button type="button" :disabled="pendingUserId === user.id" @click="toggleUserActive(user)">{{ user.is_active ? '停用' : '启用' }}</button>
+            <button type="button" :disabled="pendingUserId === user.id" @click="toggleUserAdmin(user)">{{ user.is_admin ? '取消管理员' : '设为管理员' }}</button>
+            <button type="button" :disabled="pendingUserId === user.id" @click="toggleUserMember(user)">{{ user.is_member ? '取消会员' : '设为会员' }}</button>
+            <button type="button" :disabled="pendingUserId === user.id" @click="saveUserQuota(user)">{{ quotaSaveLabel(user) }}</button>
           </div>
         </article>
       </div>
@@ -60,6 +61,7 @@ const summary = ref({})
 const users = ref([])
 const games = ref([])
 const quotaDrafts = ref({})
+const pendingUserId = ref(null)
 
 async function load() {
   await ui.run(async () => {
@@ -71,27 +73,42 @@ async function load() {
 }
 
 async function updateUser(user, data) {
-  await ui.run(async () => {
-    const updated = await updateAdminUser(user.id, data)
-    users.value = users.value.map((item) => (item.id === updated.id ? updated : item))
-    quotaDrafts.value = { ...quotaDrafts.value, [updated.id]: updated.daily_message_limit ?? 20 }
-  }, '用户状态已更新')
+  pendingUserId.value = user.id
+  try {
+    await ui.run(async () => {
+      await updateAdminUser(user.id, data)
+      users.value = await listAdminUsers()
+      quotaDrafts.value = Object.fromEntries(users.value.map((item) => [item.id, item.daily_message_limit ?? 20]))
+    })
+  } finally {
+    pendingUserId.value = null
+  }
 }
 
-function toggleUserActive(user) {
-  updateUser(user, { is_active: !user.is_active })
+async function toggleUserActive(user) {
+  await updateUser(user, { is_active: !user.is_active })
 }
 
-function toggleUserAdmin(user) {
-  updateUser(user, { is_admin: !user.is_admin })
+async function toggleUserAdmin(user) {
+  await updateUser(user, { is_admin: !user.is_admin })
 }
 
-function toggleUserMember(user) {
-  updateUser(user, { is_member: !user.is_member })
+async function toggleUserMember(user) {
+  const quota = normalizedQuotaDraft(user)
+  const nextIsMember = !user.is_member
+  await updateUser(user, {
+    is_member: nextIsMember,
+    daily_message_limit: nextIsMember ? quota : Math.min(quota || 20, 20)
+  })
 }
 
-function saveUserQuota(user) {
-  updateUser(user, { daily_message_limit: Number(quotaDrafts.value[user.id] ?? 20) })
+async function saveUserQuota(user) {
+  const quota = normalizedQuotaDraft(user)
+  const data = { daily_message_limit: quota }
+  if (!user.is_admin && !user.is_member && (quota === 0 || quota > 20)) {
+    data.is_member = true
+  }
+  await updateUser(user, data)
 }
 
 function quotaLabel(user) {
@@ -117,6 +134,17 @@ function resolveEffectiveLimit(user) {
   const configured = Number(user.daily_message_limit ?? 20)
   if (user.is_member) return configured > 0 ? configured : null
   return Math.min(Math.max(configured, 0), 20)
+}
+
+function normalizedQuotaDraft(user) {
+  const value = Number(quotaDrafts.value[user.id] ?? user.daily_message_limit ?? 20)
+  return Number.isFinite(value) && value >= 0 ? Math.floor(value) : 20
+}
+
+function quotaSaveLabel(user) {
+  const quota = normalizedQuotaDraft(user)
+  if (!user.is_admin && !user.is_member && (quota === 0 || quota > 20)) return '保存并设为会员'
+  return '保存额度'
 }
 
 onMounted(load)

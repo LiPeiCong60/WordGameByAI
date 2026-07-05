@@ -14,6 +14,7 @@ sys.path.insert(0, str(BACKEND))
 
 import game_engine
 import message_quota_service
+import routers.admin as admin_router
 import routers.management as management_router
 import routers.templates as templates_router
 from database import DEFAULT_TEMPLATES, normalize_template_character_fields
@@ -217,13 +218,36 @@ class DynamicRagTests(unittest.TestCase):
                     require_message_quota(db, member)
                 self.assertEqual(getattr(member_raised.exception, "status_code", None), 429)
 
-                admin = User(id=4, username="admin", is_admin=True, daily_message_limit=1)
-                for _ in range(3):
-                    result = require_message_quota(db, admin)
-                    self.assertIsNone(result["limit"])
+            admin = User(id=4, username="admin", is_admin=True, daily_message_limit=1)
+            for _ in range(3):
+                result = require_message_quota(db, admin)
+                self.assertIsNone(result["limit"])
         finally:
             message_quota_service.RATE_LIMIT_MAX_REQUESTS = old_short_limit
             message_quota_service._recent_requests.clear()
+
+    def test_admin_can_set_non_member_quota_below_default_and_member_quota_above_default(self) -> None:
+        with make_session() as db:
+            admin = User(id=1, username="admin", is_admin=True)
+            normal = User(id=2, username="normal", is_member=False, daily_message_limit=20)
+            db.add(admin)
+            db.add(normal)
+            db.commit()
+
+            updated = admin_router.update_user(normal.id, admin_router.AdminUserUpdate(daily_message_limit=10), admin, db)
+            self.assertFalse(updated["is_member"])
+            self.assertEqual(updated["daily_message_limit"], 10)
+            self.assertEqual(updated["effective_daily_message_limit"], 10)
+
+            upgraded = admin_router.update_user(
+                normal.id,
+                admin_router.AdminUserUpdate(is_member=True, daily_message_limit=30),
+                admin,
+                db,
+            )
+            self.assertTrue(upgraded["is_member"])
+            self.assertEqual(upgraded["daily_message_limit"], 30)
+            self.assertEqual(upgraded["effective_daily_message_limit"], 30)
 
     def test_default_templates_include_all_starter_character_fields(self) -> None:
         for template in DEFAULT_TEMPLATES:
