@@ -21,9 +21,10 @@
             {{ user.is_active ? '启用' : '停用' }} ·
             {{ quotaLabel(user) }}
           </em>
+          <span>{{ usageLabel(user) }}</span>
           <label class="compact-field">
             <span>每日上限</span>
-            <input v-model.number="quotaDrafts[user.id]" type="number" min="0" />
+            <input v-model.number="quotaDrafts[user.id]" type="number" min="0" :max="user.is_member ? undefined : 20" />
           </label>
           <div class="inline-actions">
             <button type="button" @click="toggleUserActive(user)">{{ user.is_active ? '停用' : '启用' }}</button>
@@ -95,8 +96,27 @@ function saveUserQuota(user) {
 
 function quotaLabel(user) {
   if (user.is_admin) return '不限额'
-  const effective = user.effective_daily_message_limit
-  return effective === null || effective === undefined ? '不限额' : `每日 ${effective} 条`
+  const effective = resolveEffectiveLimit(user)
+  return effective === null ? '不限额' : `每日 ${effective} 条`
+}
+
+function usageLabel(user) {
+  if (user.is_admin) return '今日已用：不限额'
+  const effective = resolveEffectiveLimit(user)
+  const used = Number(user.today_message_count ?? 0)
+  if (effective === null) return `今日已用：${used} 条`
+  const remaining = Number(user.remaining_message_count ?? Math.max(effective - used, 0))
+  return `今日已用：${used}/${effective}，剩余 ${remaining}`
+}
+
+function resolveEffectiveLimit(user) {
+  if (user.is_admin) return null
+  if (user.effective_daily_message_limit !== undefined) {
+    return user.effective_daily_message_limit === null ? null : Number(user.effective_daily_message_limit)
+  }
+  const configured = Number(user.daily_message_limit ?? 20)
+  if (user.is_member) return configured > 0 ? configured : null
+  return Math.min(Math.max(configured, 0), 20)
 }
 
 onMounted(load)

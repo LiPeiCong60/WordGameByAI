@@ -27,6 +27,18 @@ def effective_daily_message_limit(user: User) -> int | None:
     return min(max(configured, 0), DEFAULT_NON_MEMBER_DAILY_LIMIT)
 
 
+def get_today_message_usage(db: Session, user: User) -> dict:
+    limit = effective_daily_message_limit(user)
+    today = date.today().isoformat()
+    usage = db.exec(select(MessageUsage).where(MessageUsage.user_id == user.id, MessageUsage.usage_date == today)).first()
+    used = int(usage.message_count) if usage else 0
+    return {
+        "used": used,
+        "limit": limit,
+        "remaining": None if limit is None else max(limit - used, 0),
+    }
+
+
 def _check_short_window(user: User) -> None:
     if user.is_admin:
         return

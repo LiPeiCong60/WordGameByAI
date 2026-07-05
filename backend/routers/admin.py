@@ -5,11 +5,29 @@ from sqlmodel import Session, func, select
 
 from auth_service import require_admin
 from database import get_session
-from message_quota_service import DEFAULT_NON_MEMBER_DAILY_LIMIT, effective_daily_message_limit
+from message_quota_service import DEFAULT_NON_MEMBER_DAILY_LIMIT, get_today_message_usage
 from models import Game, ManagementProposal, TurnLog, User
 from schemas import AdminUserUpdate
 
 router = APIRouter()
+
+
+def admin_user_payload(user: User, db: Session) -> dict:
+    usage = get_today_message_usage(db, user)
+    return {
+        "id": user.id,
+        "username": user.username,
+        "email": user.email,
+        "is_admin": user.is_admin,
+        "is_member": user.is_member,
+        "daily_message_limit": user.daily_message_limit,
+        "effective_daily_message_limit": usage["limit"],
+        "today_message_count": usage["used"],
+        "remaining_message_count": usage["remaining"],
+        "is_active": user.is_active,
+        "created_at": user.created_at,
+        "last_login_at": user.last_login_at,
+    }
 
 
 @router.get("/admin/summary")
@@ -27,21 +45,7 @@ def admin_summary(_admin: User = Depends(require_admin), db: Session = Depends(g
 @router.get("/admin/users")
 def list_users(_admin: User = Depends(require_admin), db: Session = Depends(get_session)):
     users = db.exec(select(User).order_by(User.id.desc())).all()
-    return [
-        {
-            "id": user.id,
-            "username": user.username,
-            "email": user.email,
-            "is_admin": user.is_admin,
-            "is_member": user.is_member,
-            "daily_message_limit": user.daily_message_limit,
-            "effective_daily_message_limit": effective_daily_message_limit(user),
-            "is_active": user.is_active,
-            "created_at": user.created_at,
-            "last_login_at": user.last_login_at,
-        }
-        for user in users
-    ]
+    return [admin_user_payload(user, db) for user in users]
 
 
 @router.patch("/admin/users/{user_id}")
@@ -69,18 +73,7 @@ def update_user(user_id: int, payload: AdminUserUpdate, admin: User = Depends(re
     db.add(user)
     db.commit()
     db.refresh(user)
-    return {
-        "id": user.id,
-        "username": user.username,
-        "email": user.email,
-        "is_admin": user.is_admin,
-        "is_member": user.is_member,
-        "daily_message_limit": user.daily_message_limit,
-        "effective_daily_message_limit": effective_daily_message_limit(user),
-        "is_active": user.is_active,
-        "created_at": user.created_at,
-        "last_login_at": user.last_login_at,
-    }
+    return admin_user_payload(user, db)
 
 
 @router.get("/admin/games")
