@@ -238,6 +238,9 @@ class DynamicRagTests(unittest.TestCase):
             self.assertFalse(updated["is_member"])
             self.assertEqual(updated["daily_message_limit"], 10)
             self.assertEqual(updated["effective_daily_message_limit"], 10)
+            listed_after_quota = {item["id"]: item for item in admin_router.list_users(admin, db)}
+            self.assertEqual(listed_after_quota[normal.id]["daily_message_limit"], 10)
+            self.assertEqual(listed_after_quota[normal.id]["effective_daily_message_limit"], 10)
 
             upgraded = admin_router.update_user(
                 normal.id,
@@ -248,6 +251,9 @@ class DynamicRagTests(unittest.TestCase):
             self.assertTrue(upgraded["is_member"])
             self.assertEqual(upgraded["daily_message_limit"], 30)
             self.assertEqual(upgraded["effective_daily_message_limit"], 30)
+            listed_after_member = {item["id"]: item for item in admin_router.list_users(admin, db)}
+            self.assertTrue(listed_after_member[normal.id]["is_member"])
+            self.assertEqual(listed_after_member[normal.id]["daily_message_limit"], 30)
 
     def test_default_templates_include_all_starter_character_fields(self) -> None:
         for template in DEFAULT_TEMPLATES:

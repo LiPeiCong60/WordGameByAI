@@ -79,6 +79,10 @@ async function updateUser(user, data) {
       await updateAdminUser(user.id, data)
       users.value = await listAdminUsers()
       quotaDrafts.value = Object.fromEntries(users.value.map((item) => [item.id, item.daily_message_limit ?? 20]))
+      const refreshed = users.value.find((item) => item.id === user.id)
+      if (!refreshed || !matchesExpectedUpdate(refreshed, data)) {
+        throw new Error('用户设置没有生效，请确认服务器后端已更新并重启。')
+      }
     })
   } finally {
     pendingUserId.value = null
@@ -145,6 +149,17 @@ function quotaSaveLabel(user) {
   const quota = normalizedQuotaDraft(user)
   if (!user.is_admin && !user.is_member && (quota === 0 || quota > 20)) return '保存并设为会员'
   return '保存额度'
+}
+
+function matchesExpectedUpdate(user, data) {
+  if (Object.prototype.hasOwnProperty.call(data, 'is_active') && Boolean(user.is_active) !== Boolean(data.is_active)) return false
+  if (Object.prototype.hasOwnProperty.call(data, 'is_admin') && Boolean(user.is_admin) !== Boolean(data.is_admin)) return false
+  if (Object.prototype.hasOwnProperty.call(data, 'is_member') && Boolean(user.is_member) !== Boolean(data.is_member)) return false
+  if (
+    Object.prototype.hasOwnProperty.call(data, 'daily_message_limit') &&
+    Number(user.daily_message_limit) !== Number(data.daily_message_limit)
+  ) return false
+  return true
 }
 
 onMounted(load)
