@@ -323,6 +323,7 @@ async function runSubmittedTurn(payload, branchTarget = null) {
   await streamTurn(async (onEvent) => {
     if (branchTarget) {
       onEvent({ type: 'status', message: `正在回到第 ${branchTarget.turn_number} 轮之前...` })
+      pruneTurnLogsFrom(branchTarget.turn_number)
       await deleteTurnsFrom(branchTarget.turn_id, {
         game_id: branchTarget.game_id,
         turn_number: branchTarget.turn_number
@@ -435,6 +436,12 @@ function normalizeTurnLog(entry) {
   }
 }
 
+function pruneTurnLogsFrom(turnNumber) {
+  const targetTurn = Number(turnNumber)
+  if (!Number.isFinite(targetTurn)) return
+  turnLogs.value = turnLogs.value.filter((item) => Number(item.turn_number || 0) < targetTurn)
+}
+
 function isStateSyncPending(entry) {
   return Boolean(entry?.checker_result?.pending)
 }
@@ -537,6 +544,7 @@ async function regenerateEntry(entry) {
   const turnId = entry.id || entry.turn_id || 0
   if (!entry.turn_number) return
   if (!window.confirm('确定重新生成这一轮吗？系统会先回到这一轮之前，再用同一句玩家行动重新推进。')) return
+  pruneTurnLogsFrom(entry.turn_number)
   await streamTurn(async (onEvent) => {
     await regenerateTurnStream(turnId, onEvent, { game_id: gameStore.currentGameId, turn_number: entry.turn_number })
     await gameStore.loadCurrentGame()
