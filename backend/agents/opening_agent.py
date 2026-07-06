@@ -15,7 +15,7 @@ def run_opening_agent(context: dict) -> dict:
     )
     data = safe_json_loads(raw, default={})
     if "error" in data:
-        return {"visible_story": f"无法生成开场白：{data['error']}"}
+        return {"visible_story": "无法生成开场白：模型服务暂时不可用，请稍后重试。"}
     return data if "visible_story" in data else {"visible_story": "开场白生成失败：LLM 返回不是合法 JSON。"}
 
 

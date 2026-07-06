@@ -15,6 +15,6 @@ def run_lore_agent(text: str) -> dict:
             "content": text,
             "canon_level": "soft_canon",
             "importance": 5,
-            "error": data["error"],
+            "error": "LoreAgent unavailable.",
         }
     return data

@@ -82,7 +82,7 @@ def call_llm(
         response = runnable.invoke(messages)
         return _content_to_text(response.content)
     except Exception as exc:
-        return json.dumps({"error": f"LLM request failed: {exc}"}, ensure_ascii=False)
+        return json.dumps({"error": "LLM request failed."}, ensure_ascii=False)
 
 
 def call_llm_stream(
@@ -98,7 +98,7 @@ def call_llm_stream(
         return
 
     try:
-        runnable = _chat_model(config, api_key, timeout=None)
+        runnable = _chat_model(config, api_key, timeout=120)
         if response_format:
             runnable = runnable.bind(response_format=response_format)
         for chunk in runnable.stream(messages):
@@ -106,4 +106,4 @@ def call_llm_stream(
             if content:
                 yield content
     except Exception as exc:
-        yield f"无法生成剧情：LLM request failed: {exc}"
+        yield "无法生成剧情：模型服务暂时不可用。"

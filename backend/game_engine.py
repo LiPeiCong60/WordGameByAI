@@ -5,7 +5,8 @@ from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from datetime import datetime
 
-from sqlmodel import Session, desc, select
+from sqlalchemy import or_
+from sqlmodel import Session, desc, func, select
 
 from agents.checker_agent import run_checker_agent
 from agents.narrator_agent import run_narrator_agent, run_narrator_stream_agent
@@ -43,6 +44,8 @@ def load_game_context(game_id: int, session: Session) -> dict:
     if not game:
         raise ValueError(f"找不到游戏: {game_id}")
     current_story_world = session.get(StoryWorld, game.current_story_world_id) if game.current_story_world_id else None
+    if current_story_world and current_story_world.game_id != game_id:
+        current_story_world = None
     lore = session.exec(
         select(WorldLore).where(WorldLore.game_id == game_id).order_by(desc(WorldLore.importance))
     ).all()
@@ -50,7 +53,12 @@ def load_game_context(game_id: int, session: Session) -> dict:
     recent_turns = session.exec(
         select(TurnLog).where(TurnLog.game_id == game_id).order_by(desc(TurnLog.id)).limit(5)
     ).all()
-    templates = session.exec(select(WorldTemplate)).all()
+    template_query = select(WorldTemplate)
+    if game.owner_user_id is not None:
+        template_query = template_query.where(or_(WorldTemplate.owner_user_id == None, WorldTemplate.owner_user_id == game.owner_user_id))  # noqa: E711
+    else:
+        template_query = template_query.where(WorldTemplate.owner_user_id == None)  # noqa: E711
+    templates = session.exec(template_query).all()
     protagonist = next((c for c in characters if c.role_type == "protagonist"), None)
     return {
         "game": _model_dump(game),
@@ -537,8 +545,8 @@ def run_game_turn(
     async_state_update: bool = False,
 ) -> dict:
     context = attach_retrieved_memories(load_game_context(game_id, session), game_id, user_input, session)
-    existing_turns = session.exec(select(TurnLog).where(TurnLog.game_id == game_id)).all()
-    turn_number = len(existing_turns) + 1
+    max_turn_number = session.exec(select(func.max(TurnLog.turn_number)).where(TurnLog.game_id == game_id)).one()
+    turn_number = int(max_turn_number or 0) + 1
     snapshot_before_turn = export_game(game_id, session)
     protagonist_turn = run_protagonist_fallback(context, user_input) if fast_mode else run_protagonist_agent(context, user_input)
     npc_reactions = (
@@ -612,8 +620,8 @@ def run_game_turn_stream(
 ):
     yield {"type": "status", "message": "正在检索相关世界观和角色记忆..."}
     context = attach_retrieved_memories(load_game_context(game_id, session), game_id, user_input, session)
-    existing_turns = session.exec(select(TurnLog).where(TurnLog.game_id == game_id)).all()
-    turn_number = len(existing_turns) + 1
+    max_turn_number = session.exec(select(func.max(TurnLog.turn_number)).where(TurnLog.game_id == game_id)).one()
+    turn_number = int(max_turn_number or 0) + 1
     snapshot_before_turn = export_game(game_id, session)
 
     if fast_mode:

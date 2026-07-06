@@ -14,10 +14,10 @@ def run_management_agent(context: dict, message: str, scope: str = "") -> dict:
     data = safe_json_loads(raw, default={})
     if "error" in data:
         return {
-            "reply": f"当前无法调用 ManagementAgent：{data['error']}",
+            "reply": "当前无法调用 ManagementAgent：模型服务暂时不可用。",
             "proposed_actions": [],
             "requires_confirmation": False,
-            "error": data["error"],
+            "error": "ManagementAgent unavailable.",
         }
     data.setdefault("reply", "我已整理出修改建议。")
     data.setdefault("proposed_actions", [])

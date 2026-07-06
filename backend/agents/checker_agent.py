@@ -13,7 +13,7 @@ def run_checker_agent(context: dict, visible_story: str, state_patch: dict) -> d
     )
     data = safe_json_loads(raw, default={})
     if "error" in data:
-        return {"ok": True, "issues": [{"type": "llm_unavailable", "message": data["error"]}]}
+        return {"ok": False, "issues": [{"type": "llm_unavailable", "message": "CheckerAgent 不可用，已阻止自动落库。"}]}
     if "ok" not in data:
         return {"ok": False, "issues": [{"type": "invalid_checker_output", "message": "CheckerAgent 返回不是合法 JSON。"}]}
     return data

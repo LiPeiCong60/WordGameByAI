@@ -227,7 +227,15 @@ def run_management_chat(session_id: int, message: str, db: Session, scope: str =
 def _find_by_name_or_id(db: Session, model, game_id: int, action: dict, user: User | None = None):
     target_id = action.get("target_id") or action.get("id")
     if target_id:
-        return db.get(model, target_id)
+        target = db.get(model, target_id)
+        if not target:
+            return None
+        if model is WorldTemplate:
+            _ensure_template_write_access(target, user)
+            return target
+        if getattr(target, "game_id", None) != game_id:
+            raise HTTPException(status_code=403, detail="目标不属于当前存档。")
+        return target
     target_name = action.get("target_name") or action.get("name")
     fields = action.get("fields") or {}
     target_name = target_name or fields.get("name") or fields.get("title")
@@ -352,7 +360,12 @@ def apply_management_proposal(proposal_id: int, db: Session, user: User | None =
                 game = db.get(Game, proposal.game_id)
                 if not game:
                     raise HTTPException(status_code=404, detail="找不到游戏。")
-                results.append(crud.update_record(db, game, _clean_fields(Game, action.get("fields", {}))))
+                fields = _clean_fields(Game, action.get("fields", {}))
+                if fields.get("current_story_world_id"):
+                    world = db.get(StoryWorld, fields["current_story_world_id"])
+                    if not world or world.game_id != proposal.game_id:
+                        raise HTTPException(status_code=400, detail="当前世界不属于该存档。")
+                results.append(crud.update_record(db, game, fields))
             elif name.startswith("create_"):
                 key = name.removeprefix("create_")
                 model = MODEL_BY_ACTION.get(key)

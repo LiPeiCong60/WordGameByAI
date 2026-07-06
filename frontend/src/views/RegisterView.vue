@@ -10,7 +10,9 @@
         <label class="field"><span>邮箱，可选</span><input v-model.trim="form.email" type="email" autocomplete="email" /></label>
         <label class="field"><span>密码</span><input v-model="form.password" required minlength="8" type="password" autocomplete="new-password" /></label>
         <div class="captcha-row">
-          <button type="button" class="captcha-image" title="刷新验证码" @click="loadCaptcha" v-html="captcha.svg" />
+          <button type="button" class="captcha-image" title="刷新验证码" @click="loadCaptcha">
+            <img v-if="captchaImageSrc" :src="captchaImageSrc" alt="验证码" />
+          </button>
           <label class="field captcha-answer"><span>验证码</span><input v-model.trim="form.captcha_answer" required inputmode="numeric" autocomplete="off" /></label>
         </div>
         <button type="submit" class="primary" :disabled="ui.loading">注册并登录</button>
@@ -22,7 +24,7 @@
 </template>
 
 <script setup>
-import { onMounted, reactive } from 'vue'
+import { computed, onMounted, reactive } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
 import { getCaptcha } from '../api/auth'
 import { useAuthStore } from '../stores/authStore'
@@ -38,6 +40,9 @@ const form = reactive({
   password: '',
   captcha_answer: ''
 })
+const captchaImageSrc = computed(() => (
+  captcha.svg ? `data:image/svg+xml;charset=utf-8,${encodeURIComponent(captcha.svg)}` : ''
+))
 
 async function loadCaptcha() {
   const data = await getCaptcha()

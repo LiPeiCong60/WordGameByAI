@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, select
 
 import crud
 from auth_service import get_current_user, require_game_access
 from database import get_session
 from game_delete_service import delete_game_cascade, delete_game_related_records
-from models import Game, User
+from models import Game, StoryWorld, User
 from schemas import GameCreate, GameUpdate
 from starter_character_service import ensure_starter_characters
 
@@ -44,6 +44,11 @@ def get_game(game_id: int, db: Session = Depends(get_session), user: User = Depe
 @router.patch("/games/{game_id}")
 def update_game(game_id: int, payload: GameUpdate, db: Session = Depends(get_session), user: User = Depends(get_current_user)):
     game = require_game_access(db, game_id, user)
+    data = payload.model_dump(exclude_unset=True)
+    if data.get("current_story_world_id"):
+        world = db.get(StoryWorld, data["current_story_world_id"])
+        if not world or world.game_id != game_id:
+            raise HTTPException(status_code=400, detail="当前世界不属于该存档。")
     return crud.update_record(db, game, payload)
 
 

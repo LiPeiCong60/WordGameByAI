@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from sqlalchemy import or_
 from sqlmodel import Session, select
 
 from json_utils import parse_json_field
@@ -236,12 +237,19 @@ def _parse_starter_characters(value) -> list[dict]:
 
 
 def _template_for_game(db: Session, game: Game, template_id: int | None = None) -> WorldTemplate | None:
+    owner_user_id = game.owner_user_id
     if template_id:
         template = db.get(WorldTemplate, template_id)
-        if template:
+        if template and (template.owner_user_id is None or template.owner_user_id == owner_user_id):
             return template
+        return None
     haystack = f"{game.title} {game.genre} {game.world_type}".lower()
-    templates = db.exec(select(WorldTemplate)).all()
+    query = select(WorldTemplate)
+    if owner_user_id is not None:
+        query = query.where(or_(WorldTemplate.owner_user_id == None, WorldTemplate.owner_user_id == owner_user_id))  # noqa: E711
+    else:
+        query = query.where(WorldTemplate.owner_user_id == None)  # noqa: E711
+    templates = db.exec(query).all()
     for template in templates:
         keys = [template.name, template.genre, template.world_type]
         if any(key and key.lower() in haystack for key in keys):

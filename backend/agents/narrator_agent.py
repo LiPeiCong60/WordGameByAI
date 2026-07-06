@@ -15,7 +15,7 @@ def run_narrator_agent(context: dict, user_input: str, protagonist_turn: dict, n
     )
     data = safe_json_loads(raw, default={})
     if "error" in data:
-        return {"visible_story": f"无法生成剧情：{data['error']}"}
+        return {"visible_story": "无法生成剧情：模型服务暂时不可用，请稍后重试。"}
     return data if "visible_story" in data else {"visible_story": "剧情生成失败：LLM 返回不是合法剧情 JSON。"}
 
 

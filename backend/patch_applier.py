@@ -171,7 +171,8 @@ def apply_state_patch(game_id: int, state_patch: dict, db: Session) -> dict:
     if isinstance(story_world_patch, dict) and story_world_patch:
         world = None
         if story_world_patch.get("id"):
-            world = db.get(StoryWorld, story_world_patch["id"])
+            candidate = db.get(StoryWorld, story_world_patch["id"])
+            world = candidate if candidate and candidate.game_id == game_id else None
         elif story_world_patch.get("name"):
             world = db.exec(
                 select(StoryWorld).where(StoryWorld.game_id == game_id, StoryWorld.name == story_world_patch["name"])

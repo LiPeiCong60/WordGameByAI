@@ -22,6 +22,6 @@ def run_patch_agent(context: dict, user_input: str, npc_reactions: dict, visible
     )
     data = safe_json_loads(raw, default={})
     if "error" in data:
-        return {**EMPTY_PATCH, "error": data["error"]}
+        return {**EMPTY_PATCH, "error": "PatchAgent unavailable."}
     patch = {**EMPTY_PATCH, **data}
     return patch
