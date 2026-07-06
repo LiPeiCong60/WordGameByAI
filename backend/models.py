@@ -171,7 +171,7 @@ class TurnSnapshot(SQLModel, table=True):
     game_id: int = Field(index=True)
     turn_id: Optional[int] = Field(default=None, index=True)
     turn_number: int = Field(index=True)
-    snapshot_json: str = Field(default="{}", sa_column=Column(Text))
+    snapshot_json: str = Field(default="{}", sa_column=Column(Text(length=16777215)))
     created_at: datetime = Field(default_factory=now_utc)
 
 

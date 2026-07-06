@@ -423,6 +423,14 @@ def migrate_db_schema() -> None:
         for name, definition in additions.items():
             if name not in columns:
                 connection.execute(text(f"ALTER TABLE character ADD COLUMN {name} {definition}"))
+    if "turnsnapshot" in table_names:
+        columns = inspector.get_columns("turnsnapshot")
+        snapshot_col = next((c for c in columns if c["name"] == "snapshot_json"), None)
+        if snapshot_col and engine.dialect.name == "mysql":
+            type_str = str(snapshot_col["type"]).lower()
+            if "medium" not in type_str and "long" not in type_str:
+                with engine.begin() as connection:
+                    connection.execute(text("ALTER TABLE turnsnapshot MODIFY COLUMN snapshot_json MEDIUMTEXT"))
 
 
 def init_db() -> None:
