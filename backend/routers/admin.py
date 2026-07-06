@@ -17,7 +17,7 @@ from model_config_service import (
     upsert_model,
     user_level_id,
 )
-from models import Game, ManagementProposal, TurnLog, User
+from models import Game, ManagementProposal, TokenUsageLog, TurnLog, User
 from schemas import (
     AdminDefaultLevelUpdate,
     AdminDefaultModelUpdate,
@@ -32,6 +32,16 @@ router = APIRouter()
 
 def admin_user_payload(user: User, db: Session) -> dict:
     usage = get_today_message_usage(db, user)
+    token_stats = db.exec(
+        select(
+            func.sum(TokenUsageLog.total_tokens),
+            func.count(TokenUsageLog.id)
+        )
+        .where(TokenUsageLog.user_id == user.id)
+    ).first()
+    total_tokens = token_stats[0] if token_stats and token_stats[0] is not None else 0
+    total_calls = token_stats[1] if token_stats and token_stats[1] is not None else 0
+
     return {
         "id": user.id,
         "username": user.username,
@@ -46,6 +56,8 @@ def admin_user_payload(user: User, db: Session) -> dict:
         "is_active": user.is_active,
         "created_at": user.created_at,
         "last_login_at": user.last_login_at,
+        "total_tokens": total_tokens,
+        "total_calls": total_calls,
     }
 
 
@@ -183,3 +195,52 @@ def update_user_model_level(
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=f"找不到模型等级: {payload.level_id}") from exc
     return admin_user_payload(user, db)
+
+
+@router.get("/admin/users/{user_id}/token-usage")
+def get_user_token_usage(user_id: int, _admin: User = Depends(require_admin), db: Session = Depends(get_session)):
+    results = db.exec(
+        select(
+            TokenUsageLog.model_name,
+            func.count(TokenUsageLog.id).label("calls"),
+            func.sum(TokenUsageLog.prompt_tokens).label("prompt"),
+            func.sum(TokenUsageLog.completion_tokens).label("completion"),
+            func.sum(TokenUsageLog.total_tokens).label("total")
+        )
+        .where(TokenUsageLog.user_id == user_id)
+        .group_by(TokenUsageLog.model_name)
+    ).all()
+    return [
+        {
+            "model_name": row[0],
+            "calls": row[1],
+            "prompt_tokens": row[2] or 0,
+            "completion_tokens": row[3] or 0,
+            "total_tokens": row[4] or 0
+        }
+        for row in results
+    ]
+
+
+@router.get("/admin/token-usage/summary")
+def get_global_token_usage(_admin: User = Depends(require_admin), db: Session = Depends(get_session)):
+    results = db.exec(
+        select(
+            TokenUsageLog.model_name,
+            func.count(TokenUsageLog.id).label("calls"),
+            func.sum(TokenUsageLog.prompt_tokens).label("prompt"),
+            func.sum(TokenUsageLog.completion_tokens).label("completion"),
+            func.sum(TokenUsageLog.total_tokens).label("total")
+        )
+        .group_by(TokenUsageLog.model_name)
+    ).all()
+    return [
+        {
+            "model_name": row[0],
+            "calls": row[1],
+            "prompt_tokens": row[2] or 0,
+            "completion_tokens": row[3] or 0,
+            "total_tokens": row[4] or 0
+        }
+        for row in results
+    ]

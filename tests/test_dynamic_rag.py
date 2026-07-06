@@ -30,7 +30,7 @@ from auth_service import _sha256, login_user, register_user
 from agents.protagonist_agent import run_protagonist_fallback
 from json_utils import parse_json_field
 from management_service import apply_management_proposal
-from models import CaptchaChallenge, Character, Game, ManagementProposal, MessageUsage, RagMemory, StoryWorld, TurnLog, User, WorldLore, WorldTemplate
+from models import CaptchaChallenge, Character, Game, ManagementProposal, MessageUsage, RagMemory, StoryWorld, TokenUsageLog, TurnLog, User, WorldLore, WorldTemplate
 from patch_applier import apply_state_patch
 from rag_service import retrieve_related_memories, store_turn_memory
 from routers.rag import rebuild_game_rag, search_rag_memories
@@ -1008,7 +1008,7 @@ class DynamicRagTests(unittest.TestCase):
         original_chat_model = llm_client._chat_model
         seen_timeouts = []
 
-        def fake_chat_model(config, api_key, timeout):
+        def fake_chat_model(config, api_key, timeout, *args, **kwargs):
             seen_timeouts.append(timeout)
             raise RuntimeError("provider leaked sk-secret-value")
 
@@ -1030,6 +1030,51 @@ class DynamicRagTests(unittest.TestCase):
         self.assertNotIn("sk-secret-value", stream_result)
         self.assertIn(60, seen_timeouts)
         self.assertIn(120, seen_timeouts)
+
+    def test_token_usage_logging_and_endpoints(self) -> None:
+        with make_session() as db:
+            user = User(id=42, username="token_user")
+            db.add(user)
+            db.commit()
+
+            import database
+            original_engine = database.engine
+            database.engine = db.bind
+
+            try:
+                llm_client._log_token_usage(42, "test-model-abc", 100, 200)
+
+                logs = db.exec(select(TokenUsageLog).where(TokenUsageLog.user_id == 42)).all()
+                self.assertEqual(len(logs), 1)
+                self.assertEqual(logs[0].model_name, "test-model-abc")
+                self.assertEqual(logs[0].prompt_tokens, 100)
+                self.assertEqual(logs[0].completion_tokens, 200)
+                self.assertEqual(logs[0].total_tokens, 300)
+
+                payload = admin_router.admin_user_payload(user, db)
+                self.assertEqual(payload["total_tokens"], 300)
+                self.assertEqual(payload["total_calls"], 1)
+
+                usage_resp = admin_router.get_user_token_usage(42, User(is_admin=True), db)
+                self.assertEqual(len(usage_resp), 1)
+                self.assertEqual(usage_resp[0]["model_name"], "test-model-abc")
+                self.assertEqual(usage_resp[0]["prompt_tokens"], 100)
+                self.assertEqual(usage_resp[0]["completion_tokens"], 200)
+                self.assertEqual(usage_resp[0]["total_tokens"], 300)
+                self.assertEqual(usage_resp[0]["calls"], 1)
+
+                global_resp = admin_router.get_global_token_usage(User(is_admin=True), db)
+                self.assertEqual(len(global_resp), 1)
+                self.assertEqual(global_resp[0]["model_name"], "test-model-abc")
+                self.assertEqual(global_resp[0]["total_tokens"], 300)
+                self.assertEqual(global_resp[0]["calls"], 1)
+
+                prompt, completion = llm_client._estimate_tokens([{"role": "user", "content": "hello"}], "world")
+                self.assertEqual(prompt, 4)
+                self.assertEqual(completion, 4)
+
+            finally:
+                database.engine = original_engine
 
 
 if __name__ == "__main__":

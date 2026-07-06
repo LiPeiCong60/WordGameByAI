@@ -67,6 +67,16 @@ class MessageUsage(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=now_utc)
 
 
+class TokenUsageLog(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: int = Field(index=True)
+    model_name: str = Field(index=True, max_length=150)
+    prompt_tokens: int = Field(default=0)
+    completion_tokens: int = Field(default=0)
+    total_tokens: int = Field(default=0)
+    created_at: datetime = Field(default_factory=now_utc)
+
+
 class WorldTemplate(TimestampMixin, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     owner_user_id: Optional[int] = Field(default=None, index=True)

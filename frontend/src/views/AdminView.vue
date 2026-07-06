@@ -11,17 +11,46 @@
         <div><span>回合</span><strong>{{ summary.turns ?? '-' }}</strong></div>
         <div><span>待确认</span><strong>{{ summary.pending_proposals ?? '-' }}</strong></div>
       </div>
+
+      <div v-if="globalTokenUsage.length" class="global-token-section">
+        <h3 class="section-subtitle">全局大模型消耗统计</h3>
+        <div class="token-bar-chart">
+          <div v-for="item in globalTokenUsage" :key="item.model_name" class="chart-row">
+            <div class="chart-label">
+              <span class="model-name">{{ item.model_name }}</span>
+              <span class="token-count">{{ formatNumber(item.total_tokens) }} tokens ({{ item.calls }} 次)</span>
+            </div>
+            <div class="bar-container">
+              <div 
+                class="bar prompt-bar" 
+                :style="{ width: `${(item.prompt_tokens / maxGlobalTokens) * 100}%` }"
+                :title="`提示词 Token: ${formatNumber(item.prompt_tokens)}`"
+              />
+              <div 
+                class="bar completion-bar" 
+                :style="{ width: `${(item.completion_tokens / maxGlobalTokens) * 100}%` }"
+                :title="`生成 Token: ${formatNumber(item.completion_tokens)}`"
+              />
+            </div>
+            <div class="chart-legend-row">
+              <span>提示: {{ formatNumber(item.prompt_tokens) }}</span>
+              <span>生成: {{ formatNumber(item.completion_tokens) }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <h2 class="section-title">用户</h2>
       <div class="admin-list">
         <article v-for="user in users" :key="user.id">
-          <strong>{{ user.username }}</strong>
+          <strong class="clickable-username" title="点击查看 Token 消耗详情" @click="selectUserForUsage(user)">{{ user.username }}</strong>
           <span>{{ user.email || '未填写邮箱' }}</span>
           <em>
             {{ user.is_admin ? '管理员' : '玩家' }} · {{ user.is_member ? '会员' : '非会员' }} ·
             {{ user.is_active ? '启用' : '停用' }} ·
             {{ quotaLabel(user) }}
           </em>
-          <span>{{ usageLabel(user) }}</span>
+          <span>{{ usageLabel(user) }} · 累计 Token: {{ formatNumber(user.total_tokens) }} (调用 {{ user.total_calls }} 次)</span>
           <label class="compact-field model-level-field">
             <span>模型等级</span>
             <select :value="user.model_level_id || ''" :disabled="pendingUserId === user.id" @change="saveUserModelLevel(user, $event.target.value)">
@@ -109,11 +138,43 @@
         </article>
       </div>
     </div>
+
+    <div v-if="selectedUser" class="panel user-token-panel">
+      <header class="panel-header">
+        <h1>【{{ selectedUser.username }}】消耗详情</h1>
+        <button type="button" class="close-button" @click="selectedUser = null">关闭</button>
+      </header>
+      <div class="token-bar-chart">
+        <div v-if="!selectedUserUsage.length" class="empty-state">该用户暂无大模型使用记录</div>
+        <div v-for="item in selectedUserUsage" :key="item.model_name" class="chart-row">
+          <div class="chart-label">
+            <span class="model-name">{{ item.model_name }}</span>
+            <span class="token-count">{{ formatNumber(item.total_tokens) }} tokens ({{ item.calls }} 次)</span>
+          </div>
+          <div class="bar-container">
+            <div 
+              class="bar prompt-bar" 
+              :style="{ width: `${(item.prompt_tokens / maxUserTokens) * 100}%` }"
+              :title="`提示词 Token: ${formatNumber(item.prompt_tokens)}`"
+            />
+            <div 
+              class="bar completion-bar" 
+              :style="{ width: `${(item.completion_tokens / maxUserTokens) * 100}%` }"
+              :title="`生成 Token: ${formatNumber(item.completion_tokens)}`"
+            />
+          </div>
+          <div class="chart-legend-row">
+            <span>提示: {{ formatNumber(item.prompt_tokens) }}</span>
+            <span>生成: {{ formatNumber(item.completion_tokens) }}</span>
+          </div>
+        </div>
+      </div>
+    </div>
   </section>
 </template>
 
 <script setup>
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { RefreshCw } from 'lucide-vue-next'
 import {
   deleteAdminModel,
@@ -127,7 +188,9 @@ import {
   setAdminDefaultLevel,
   setAdminDefaultModel,
   updateAdminUser,
-  updateAdminUserModelLevel
+  updateAdminUserModelLevel,
+  getUserTokenUsage,
+  getGlobalTokenUsage
 } from '../api/admin'
 import { useUiStore } from '../stores/uiStore'
 
@@ -140,6 +203,39 @@ const pendingUserId = ref(null)
 const modelConfig = ref({ models: [], levels: [], agent_names: [], user_levels: {} })
 const modelForm = ref(emptyModelForm())
 const levelForm = ref(emptyLevelForm())
+const globalTokenUsage = ref([])
+const selectedUser = ref(null)
+const selectedUserUsage = ref([])
+
+const maxGlobalTokens = computed(() => {
+  const values = globalTokenUsage.value.map(item => item.total_tokens)
+  return values.length ? Math.max(...values) : 1
+})
+
+const maxUserTokens = computed(() => {
+  const values = selectedUserUsage.value.map(item => item.total_tokens)
+  return values.length ? Math.max(...values) : 1
+})
+
+function formatNumber(num) {
+  if (num === null || num === undefined) return '0'
+  return Number(num).toLocaleString('zh-CN')
+}
+
+async function selectUserForUsage(user) {
+  if (selectedUser.value?.id === user.id) {
+    selectedUser.value = null
+    selectedUserUsage.value = []
+    return
+  }
+  selectedUser.value = user
+  selectedUserUsage.value = []
+  try {
+    selectedUserUsage.value = await getUserTokenUsage(user.id)
+  } catch (err) {
+    console.error(err)
+  }
+}
 
 async function load() {
   await ui.run(async () => {
@@ -148,6 +244,10 @@ async function load() {
     users.value = await listAdminUsers()
     quotaDrafts.value = Object.fromEntries(users.value.map((user) => [user.id, user.daily_message_limit ?? 20]))
     games.value = await listAdminGames()
+    globalTokenUsage.value = await getGlobalTokenUsage()
+    if (selectedUser.value) {
+      selectedUserUsage.value = await getUserTokenUsage(selectedUser.value.id)
+    }
   })
 }
 
@@ -362,3 +462,137 @@ function modelLabel(modelId) {
 
 onMounted(load)
 </script>
+
+<style scoped>
+.clickable-username {
+  cursor: pointer;
+  color: #3b82f6;
+  text-decoration: none;
+  transition: color 0.2s, text-decoration 0.2s;
+}
+.clickable-username:hover {
+  color: #60a5fa;
+  text-decoration: underline;
+}
+
+.global-token-section {
+  margin-top: 1.5rem;
+  margin-bottom: 1.5rem;
+  padding: 1rem;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.section-subtitle {
+  font-size: 1.1rem;
+  margin-bottom: 1rem;
+  color: #fff;
+  border-left: 3px solid #3b82f6;
+  padding-left: 8px;
+}
+
+.token-bar-chart {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.chart-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  background: rgba(255, 255, 255, 0.01);
+  padding: 8px;
+  border-radius: 6px;
+}
+
+.chart-label {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.85rem;
+}
+
+.model-name {
+  font-weight: 600;
+  color: #e0e0e0;
+}
+
+.token-count {
+  font-size: 0.8rem;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.bar-container {
+  display: flex;
+  height: 10px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 5px;
+  overflow: hidden;
+  position: relative;
+  width: 100%;
+}
+
+.bar {
+  height: 100%;
+  transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.prompt-bar {
+  background: linear-gradient(90deg, #3b82f6, #60a5fa);
+}
+
+.completion-bar {
+  background: linear-gradient(90deg, #10b981, #34d399);
+}
+
+.chart-legend-row {
+  display: flex;
+  gap: 1rem;
+  font-size: 0.7rem;
+  color: rgba(255, 255, 255, 0.4);
+  margin-top: 0.1rem;
+}
+
+.user-token-panel {
+  margin-top: 1rem;
+  border: 1px solid rgba(59, 130, 246, 0.2);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+  animation: slideIn 0.25s ease-out;
+}
+
+.close-button {
+  background: rgba(255, 255, 255, 0.08);
+  border: none;
+  padding: 4px 10px;
+  border-radius: 4px;
+  color: #fff;
+  cursor: pointer;
+  font-size: 0.8rem;
+  transition: background 0.2s;
+}
+
+.close-button:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.empty-state {
+  text-align: center;
+  padding: 1.5rem;
+  color: rgba(255, 255, 255, 0.4);
+  font-size: 0.85rem;
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+</style>

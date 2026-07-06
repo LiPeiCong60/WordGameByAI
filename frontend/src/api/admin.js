@@ -12,3 +12,5 @@ export const deleteAdminModelLevel = (id) => apiDelete(`/admin/model-config/leve
 export const setAdminDefaultModel = (modelId) => apiPatch('/admin/model-config/default-model', { model_id: modelId })
 export const setAdminDefaultLevel = (levelId) => apiPatch('/admin/model-config/default-level', { level_id: levelId })
 export const updateAdminUserModelLevel = (id, levelId) => apiPatch(`/admin/users/${id}/model-level`, { level_id: levelId })
+export const getUserTokenUsage = (id) => apiGet(`/admin/users/${id}/token-usage`)
+export const getGlobalTokenUsage = () => apiGet('/admin/token-usage/summary')
