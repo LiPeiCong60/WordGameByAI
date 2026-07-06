@@ -194,9 +194,31 @@ function storySegments(text) {
   return segments
 }
 
+function splitDialogueAndNarration(speaker, content) {
+  const regex = /(\[[^\]]*\]|【[^】]*】|（[^）]*）|\([^)]*\)|\[[^\]]*$|【[^】]*$|（[^）]*$|\([^)]*$)/g
+  const parts = content.split(regex)
+  const result = []
+
+  for (const part of parts) {
+    if (!part) continue
+    const isWrapped = /^([\[【（(])/.test(part)
+    if (isWrapped) {
+      result.push({ type: 'narration', lines: [part.trim()] })
+    } else {
+      const trimmed = part.trim()
+      if (trimmed) {
+        result.push({ type: 'role', speaker, lines: [trimmed] })
+      }
+    }
+  }
+  return result
+}
+
 function parseParagraphSegments(part) {
   const roleSegment = parseRoleSegment(part)
-  if (roleSegment) return [roleSegment]
+  if (roleSegment) {
+    return splitDialogueAndNarration(roleSegment.speaker, roleSegment.lines[0])
+  }
 
   const mixed = splitLeadingNarrationAndDialogue(part)
   if (mixed) return mixed
@@ -225,7 +247,7 @@ function splitLeadingNarrationAndDialogue(part) {
 
   return [
     { type: 'narration', lines: [extracted.narration] },
-    roleSegment,
+    ...splitDialogueAndNarration(roleSegment.speaker, roleSegment.lines[0])
   ]
 }
 
