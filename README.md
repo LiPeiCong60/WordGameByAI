@@ -119,7 +119,7 @@ OPENAI_API_KEY=your_api_key_here
 OPENAI_BASE_URL=https://api.openai.com/v1
 OPENAI_MODEL=gpt-4o-mini
 MODEL_CONFIG_FILE=./model_configs.json
-DATABASE_URL=sqlite:///./narrative_agent.db
+DATABASE_URL=mysql+pymysql://wordgame:change_this_password@127.0.0.1:3306/wordgame?charset=utf8mb4
 CORS_ALLOW_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
 AUTH_TOKEN_TTL_DAYS=14
 NON_MEMBER_DAILY_MESSAGE_LIMIT=20
@@ -174,7 +174,7 @@ OPENAI_API_KEY=your_api_key_here
 OPENAI_BASE_URL=https://api.openai.com/v1
 OPENAI_MODEL=gpt-4o-mini
 MODEL_CONFIG_FILE=./model_configs.json
-DATABASE_URL=sqlite:///./narrative_agent.db
+DATABASE_URL=mysql+pymysql://wordgame:change_this_password@127.0.0.1:3306/wordgame?charset=utf8mb4
 CORS_ALLOW_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
 AUTH_TOKEN_TTL_DAYS=14
 ```
@@ -185,7 +185,7 @@ AUTH_TOKEN_TTL_DAYS=14
 | `OPENAI_BASE_URL` | OpenAI-compatible API 地址，可接入兼容 OpenAI 协议的模型服务。 | 否，默认 OpenAI API |
 | `OPENAI_MODEL` | 使用的模型名称。 | 否，默认 `gpt-4o-mini` |
 | `MODEL_CONFIG_FILE` | 管理后台写入的模型池、模型等级和私有 API Key 配置文件路径。接口只返回 `has_api_key`，不会返回密钥内容。 | 否，默认 `backend/model_configs.json` |
-| `DATABASE_URL` | SQLModel 数据库连接地址。 | 否，默认本地 SQLite |
+| `DATABASE_URL` | SQLModel 数据库连接地址。生产建议 MySQL，例如 `mysql+pymysql://wordgame:密码@127.0.0.1:3306/wordgame?charset=utf8mb4`；本地快速开发也可用 `sqlite:///./narrative_agent.db`。 | 否，默认本地 SQLite |
 | `CORS_ALLOW_ORIGINS` | 允许访问后端 API 的前端域名，公网部署时必须改成你的 HTTPS 域名。 | 否，本地开发地址 |
 | `AUTH_TOKEN_TTL_DAYS` | 登录 token 有效天数。 | 否，默认 `14` |
 | `NON_MEMBER_DAILY_MESSAGE_LIMIT` | 非会员每日可发送的大模型消息数上限。管理员和会员可在后台按用户调整。 | 否，默认 `20` |
@@ -265,7 +265,26 @@ AUTH_TOKEN_TTL_DAYS=14
 - 用 Nginx / Caddy 通过 `/api` 反向代理到 FastAPI，通过 `/uploads` 提供上传资源。
 - 前端构建时设置 `VITE_API_BASE_URL=https://你的域名/api`。
 - 生产环境只在服务器私有 `.env` 或后台生成的 `backend/model_configs.json` 中保存真实模型 API Key；前端不会通过接口读取到密钥明文。
-- 正式多人使用建议从 SQLite 迁移到 PostgreSQL，并配置备份。
+- 正式多人使用建议使用 MySQL，并配置备份。
+
+### MySQL 数据库
+
+服务器上可以先创建数据库和专用账号：
+
+```sql
+CREATE DATABASE wordgame CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE USER 'wordgame'@'127.0.0.1' IDENTIFIED BY '替换成强密码';
+GRANT ALL PRIVILEGES ON wordgame.* TO 'wordgame'@'127.0.0.1';
+FLUSH PRIVILEGES;
+```
+
+然后在 `backend/.env` 中设置：
+
+```env
+DATABASE_URL=mysql+pymysql://wordgame:替换成强密码@127.0.0.1:3306/wordgame?charset=utf8mb4
+```
+
+首次启动后端时会自动创建表结构。已有 SQLite 老数据不会自动迁移到 MySQL，若需要迁移，应先导出存档或编写一次性迁移脚本。
 
 ### TurnRequest 示例
 

@@ -19,11 +19,11 @@ class TimestampMixin(SQLModel):
 class Game(TimestampMixin, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     owner_user_id: Optional[int] = Field(default=None, index=True)
-    title: str
-    genre: str = ""
-    world_type: str = ""
-    tone: str = ""
-    narrative_perspective: str = "第二人称"
+    title: str = Field(max_length=200)
+    genre: str = Field(default="", max_length=100)
+    world_type: str = Field(default="", max_length=100)
+    tone: str = Field(default="", max_length=200)
+    narrative_perspective: str = Field(default="第二人称", max_length=50)
     style_guide: str = Field(default="", sa_column=Column(Text))
     rules_summary: str = Field(default="", sa_column=Column(Text))
     current_state: str = Field(default="", sa_column=Column(Text))
@@ -32,8 +32,8 @@ class Game(TimestampMixin, table=True):
 
 class User(TimestampMixin, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
-    username: str = Field(index=True)
-    email: str = Field(default="", index=True)
+    username: str = Field(index=True, max_length=80)
+    email: str = Field(default="", index=True, max_length=200)
     password_hash: str = Field(default="", sa_column=Column(Text))
     is_admin: bool = False
     is_member: bool = False
@@ -45,14 +45,14 @@ class User(TimestampMixin, table=True):
 class AuthToken(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     user_id: int = Field(index=True)
-    token_hash: str = Field(index=True)
+    token_hash: str = Field(index=True, max_length=128)
     created_at: datetime = Field(default_factory=now_utc)
     expires_at: datetime = Field(index=True)
     revoked: bool = False
 
 
 class CaptchaChallenge(SQLModel, table=True):
-    id: str = Field(primary_key=True)
+    id: str = Field(primary_key=True, max_length=80)
     answer_hash: str = Field(default="", sa_column=Column(Text))
     created_at: datetime = Field(default_factory=now_utc)
     expires_at: datetime = Field(index=True)
@@ -62,7 +62,7 @@ class CaptchaChallenge(SQLModel, table=True):
 class MessageUsage(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     user_id: int = Field(index=True)
-    usage_date: str = Field(index=True)
+    usage_date: str = Field(index=True, max_length=20)
     message_count: int = 0
     updated_at: datetime = Field(default_factory=now_utc)
 
@@ -70,10 +70,10 @@ class MessageUsage(SQLModel, table=True):
 class WorldTemplate(TimestampMixin, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     owner_user_id: Optional[int] = Field(default=None, index=True)
-    name: str
-    genre: str = ""
-    world_type: str = ""
-    tone: str = ""
+    name: str = Field(max_length=200)
+    genre: str = Field(default="", max_length=100)
+    world_type: str = Field(default="", max_length=100)
+    tone: str = Field(default="", max_length=200)
     description: str = Field(default="", sa_column=Column(Text))
     default_style_guide: str = Field(default="", sa_column=Column(Text))
     default_rules: str = Field(default="", sa_column=Column(Text))
@@ -83,8 +83,8 @@ class WorldTemplate(TimestampMixin, table=True):
 class StoryWorld(TimestampMixin, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     game_id: int = Field(index=True)
-    name: str
-    world_type: str = ""
+    name: str = Field(max_length=200)
+    world_type: str = Field(default="", max_length=100)
     summary: str = Field(default="", sa_column=Column(Text))
     current_status: str = Field(default="", sa_column=Column(Text))
     mission_objective: str = Field(default="", sa_column=Column(Text))
@@ -96,30 +96,30 @@ class StoryWorld(TimestampMixin, table=True):
 class WorldLore(TimestampMixin, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     game_id: int = Field(index=True)
-    title: str
-    category: str = "其他"
+    title: str = Field(max_length=200)
+    category: str = Field(default="其他", max_length=80)
     content: str = Field(default="", sa_column=Column(Text))
-    canon_level: str = "soft_canon"
+    canon_level: str = Field(default="soft_canon", max_length=50)
     importance: int = 5
 
 
 class Character(TimestampMixin, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     game_id: int = Field(index=True)
-    name: str
-    role_type: str = "npc"
-    avatar_url: str = ""
-    gender: str = ""
-    age: str = ""
-    race_or_identity: str = ""
+    name: str = Field(max_length=120)
+    role_type: str = Field(default="npc", max_length=50)
+    avatar_url: str = Field(default="", max_length=500)
+    gender: str = Field(default="", max_length=50)
+    age: str = Field(default="", max_length=50)
+    race_or_identity: str = Field(default="", max_length=200)
     appearance: str = Field(default="", sa_column=Column(Text))
     personality: str = Field(default="", sa_column=Column(Text))
     speech_style: str = Field(default="", sa_column=Column(Text))
     abilities: str = Field(default="", sa_column=Column(Text))
-    current_location: str = ""
-    status: str = "normal"
-    mood: str = ""
-    relationship_to_player: str = ""
+    current_location: str = Field(default="", max_length=300)
+    status: str = Field(default="normal", max_length=80)
+    mood: str = Field(default="", max_length=200)
+    relationship_to_player: str = Field(default="", max_length=200)
     relationship_score: int = 0
     affection_score: int = 0
     trust_score: int = 0
@@ -134,11 +134,11 @@ class Character(TimestampMixin, table=True):
 class RagMemory(TimestampMixin, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     game_id: int = Field(index=True)
-    source_type: str = Field(index=True)
+    source_type: str = Field(index=True, max_length=80)
     source_id: Optional[int] = Field(default=None, index=True)
-    title: str = ""
+    title: str = Field(default="", max_length=240)
     content: str = Field(default="", sa_column=Column(Text))
-    tags: str = ""
+    tags: str = Field(default="", max_length=500)
     importance: int = 5
     embedding_json: str = Field(default="{}", sa_column=Column(Text))
     extra_attrs: str = Field(default="{}", sa_column=Column(Text))
@@ -169,8 +169,8 @@ class ManagementSession(TimestampMixin, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     game_id: int = Field(index=True)
     owner_user_id: Optional[int] = Field(default=None, index=True)
-    title: str = "管理对话"
-    status: str = "active"
+    title: str = Field(default="管理对话", max_length=200)
+    status: str = Field(default="active", max_length=50)
 
 
 class ManagementProposal(TimestampMixin, table=True):
@@ -181,5 +181,5 @@ class ManagementProposal(TimestampMixin, table=True):
     user_request: str = Field(default="", sa_column=Column(Text))
     agent_response: str = Field(default="", sa_column=Column(Text))
     proposed_actions: str = Field(default="[]", sa_column=Column(Text))
-    status: str = "pending_confirmation"
+    status: str = Field(default="pending_confirmation", max_length=50)
     applied_at: Optional[datetime] = None
