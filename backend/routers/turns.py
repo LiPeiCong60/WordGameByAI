@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextvars
 import json
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -18,6 +19,18 @@ from turn_history_service import delete_turns_from, get_turn_for_action, regener
 router = APIRouter()
 
 
+class ContextPreservingIterator:
+    def __init__(self, iterator):
+        self.iterator = iterator
+        self.context = contextvars.copy_context()
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        return self.context.run(next, self.iterator)
+
+
 def _run_with_llm_user(user: User, fn):
     token = set_current_llm_user(user.id)
     try:
@@ -27,11 +40,13 @@ def _run_with_llm_user(user: User, fn):
 
 
 def _stream_with_llm_user(user: User, events):
-    token = set_current_llm_user(user.id)
-    try:
-        yield from events
-    finally:
-        reset_current_llm_user(token)
+    def generator():
+        token = set_current_llm_user(user.id)
+        try:
+            yield from events
+        finally:
+            reset_current_llm_user(token)
+    return ContextPreservingIterator(generator())
 
 
 @router.post("/games/{game_id}/turn")
