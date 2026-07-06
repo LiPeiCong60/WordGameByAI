@@ -192,6 +192,8 @@ function storySegments(text) {
     for (const segment of parseParagraphSegments(part, activeSpeaker)) {
       if (segment.type === 'role') {
         activeSpeaker = segment.speaker
+      } else {
+        activeSpeaker = null
       }
       pushSegment(segments, segment)
     }
