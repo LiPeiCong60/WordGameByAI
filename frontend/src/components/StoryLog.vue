@@ -268,8 +268,13 @@ function parseParagraphSegments(part, activeSpeaker) {
   const bySpeaker = splitParagraphBySpeaker(part)
   if (bySpeaker) return bySpeaker
 
-  const speaker = activeSpeaker || '你'
-  return splitDialogueAndNarration(speaker, part)
+  // If there is no active speaker, any paragraph without an explicit speaker colon
+  // must be treated as narration rather than defaulting to protagonist dialogue.
+  if (!activeSpeaker) {
+    return [{ type: 'narration', lines: [part] }]
+  }
+
+  return splitDialogueAndNarration(activeSpeaker, part)
 }
 
 function normalizeSpeaker(speaker) {
