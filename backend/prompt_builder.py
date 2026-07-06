@@ -8,6 +8,8 @@ def compact_context(context: dict[str, Any]) -> str:
     return json.dumps(context, ensure_ascii=False, default=str)
 
 
+JSON_ONLY_RULE = "只输出合法 JSON 对象，不要 Markdown、代码块、XML/HTML 标签、额外解释或前后缀文本。"
+
 NARRATIVE_FORMAT_RULES = (
     "玩家行动是用户发给系统的推进指令，也是一种特殊旁白；不要把玩家行动原样照抄成旁白。"
     "玩家输入可能包含结构化字段：行动/背景/希望响应、主角台词、空白补全。"
@@ -26,11 +28,13 @@ NARRATIVE_FORMAT_RULES = (
     "4. 如果一段里既有动作又有说话，必须拆成两段：先写 [动作/描写]，再写 角色名：台词。"
     "5. 玩家输入里的主角台词/角色说的话必须作为独立对白段输出，不能并入 [] 旁白段。"
     "6. 旁白或动作即使以角色名开头，也必须放进 []，例如：[周临的瞳孔骤然收缩。]，不能写成 周临的瞳孔骤然收缩。"
-    "7. 不要使用项目符号、Markdown、解释文字或格式说明。"
+    "7. 玩家可见剧情中严禁出现 XML/HTML/系统标签、state_hint 字样、隐藏标签或尖括号标签。"
+    "8. 不要使用项目符号、Markdown、解释文字或格式说明。"
 )
 
 STATE_HINT_INSTRUCTIONS = (
     "同时输出用户不可见的 state_hint，只用于即时同步角色软状态。"
+    "state_hint 是给系统解析的内部数据，不属于 visible_story，不能混入玩家可见剧情正文。"
     "state_hint 只允许包含 current_state_update 和 updated_characters。"
     "current_state_update 必须是简短自然语言字符串，不要输出对象或数组；如果时间、地点或场景阶段发生变化，必须写清楚，例如 当前时间:傍晚；当前位置:商场三楼蔚蓝女装店前；当前状况:林晚发来消息。"
     "updated_characters 每项必须指向已存在角色，使用 name 或 id；只允许字段 status, mood, relationship_to_player, "
@@ -40,9 +44,11 @@ STATE_HINT_INSTRUCTIONS = (
 )
 
 STATE_HINT_TAG_INSTRUCTIONS = (
-    "正文结束后追加一段系统隐藏标签：<STATE_HINT>{...}</STATE_HINT>。"
+    "正文结束后追加一段系统隐藏标签，且标签名必须完全一致：<STATE_HINT>{...}</STATE_HINT>。"
     "标签内 JSON 遵守 state_hint 规则，只写 current_state_update 和 updated_characters。"
-    "标签不会展示给玩家；不要使用 Markdown 或代码块。"
+    "如果本轮没有状态变化，也必须输出 <STATE_HINT>{\"current_state_update\":\"\",\"updated_characters\":[]}</STATE_HINT>。"
+    "不要发明、改写或输出任何其他标签名；不要输出 dummy_state_hint、state_hint 标签或小写标签。"
+    "标签不会展示给玩家；玩家可见正文里不得出现任何尖括号标签、Markdown 或代码块。"
 )
 
 RELATION_METRIC_RULES = (
@@ -78,8 +84,10 @@ def build_protagonist_messages(context: dict[str, Any], user_input: str) -> list
                 f"主角对白格式必须是 {protagonist_name}：台词。"
                 "如果玩家输入是动作，就生成主角行动描写。"
                 "如果玩家输入同时包含动作和话语，必须拆成行动段和对白段。"
+                "不得输出 state_hint、隐藏标签、系统标签或任何内部控制字段。"
                 f"{NARRATIVE_FORMAT_RULES}"
-                "只输出 JSON: {\"visible_story\":\"...\", \"intent_summary\":\"...\"}。"
+                f"{JSON_ONLY_RULE}"
+                "JSON 结构必须是 {\"visible_story\":\"...\", \"intent_summary\":\"...\"}。"
                 "visible_story 只写主角自己的行为、对白、心理，不写 NPC 反应，不写结果总结。"
             ),
         },
@@ -111,7 +119,9 @@ def build_npc_reaction_messages(
                 "不要让所有启用子 Agent 的 NPC 都默认出场。必须先结合当前地点、角色当前位置、最近剧情、用户行动、主角输出和当前状态判断哪些 NPC 自然在场、会抵达、会通讯或需要反应。"
                 "如果没有 NPC 应该自然出现或反应，reactions 必须返回空数组，不能硬安排 NPC 出场。"
                 "如果某个 NPC 不在当前场景且没有合理抵达/通讯理由，不要输出该 NPC 的反应。"
-                "输出 JSON，字段包含 reactions、selected_npcs、omitted_npcs、selection_reason。"
+                "不要输出玩家可见剧情正文、隐藏标签、state_hint 或系统控制字段。"
+                f"{JSON_ONLY_RULE}"
+                "JSON 字段包含 reactions、selected_npcs、omitted_npcs、selection_reason。"
             ),
         },
         {
@@ -147,7 +157,8 @@ def build_narrator_messages(
                 "你只需要接着写 NPC、环境和后续反馈；如果后续主角需要继续说话，也必须使用主角名对白格式。"
                 f"{NARRATIVE_FORMAT_RULES}"
                 f"{STATE_HINT_INSTRUCTIONS}"
-                "输出必须是 JSON: {\"visible_story\":\"...\",\"state_hint\":{\"current_state_update\":\"...\",\"updated_characters\":[]}}，visible_story 字符串内也必须遵守上述排版规则。"
+                f"{JSON_ONLY_RULE}"
+                "JSON 结构必须是 {\"visible_story\":\"...\",\"state_hint\":{\"current_state_update\":\"...\",\"updated_characters\":[]}}，visible_story 字符串内也必须遵守上述排版规则，且不得包含任何隐藏标签或 state_hint 内容。"
             ),
         },
         {
@@ -214,7 +225,8 @@ def build_opening_messages(context: dict[str, Any]) -> list[dict[str, str]]:
                 "可以让重要 NPC 出现，但必须结合角色当前位置、关系和题材逻辑；不要为了热闹强行让所有 NPC 出场。"
                 "不要写系统说明、玩法提示、选项列表或 Markdown。不要出现“玩家指令”。"
                 f"{NARRATIVE_FORMAT_RULES}"
-                "只输出 JSON: {\"visible_story\":\"...\"}。"
+                f"{JSON_ONLY_RULE}"
+                "JSON 结构必须是 {\"visible_story\":\"...\"}。"
             ),
         },
         {
@@ -264,10 +276,12 @@ def build_patch_messages(
                 "重要 NPC 放入 new_characters，字段包括 name, role_type, gender, age, race_or_identity, appearance, personality, speech_style, abilities, current_location, status, mood, relationship_to_player, relationship_score, affection_score, trust_score, tension_score, current_goal, hidden_goal, memory_summary, agent_enabled, importance, management_reason, extra_attrs。"
                 "已存在角色发生明确情绪、关系、位置、目标或通讯状态变化时，放入 updated_characters，可更新 name/id, status, mood, relationship_to_player, relationship_score, affection_score, trust_score, tension_score, current_goal, current_location, memory_summary, extra_attrs。"
                 "agent_enabled 默认 true；如果只是可管理但不需要单独子智能体，可设 false。"
+                "current_state_update 必须是自然语言字符串，不要输出对象、数组、隐藏标签或 state_hint 标签。"
                 "背景角色/群体判定：路人、一群军人、猎户们、店员、守卫、围观者、无名群众、一次性功能角色。"
                 "背景角色/群体不要放入 new_characters；它们只保留在剧情正文和回合记忆里。"
                 "不要生成任务结算或其他持久化系统字段。"
-                "只输出 JSON，必须包含这些顶层字段：current_state_update, new_characters, updated_characters, updated_story_world, player_choices。"
+                f"{JSON_ONLY_RULE}"
+                "JSON 必须包含这些顶层字段：current_state_update, new_characters, updated_characters, updated_story_world, player_choices。"
             ),
         },
         {
@@ -286,7 +300,8 @@ def build_checker_messages(context: dict[str, Any], visible_story: str, state_pa
             "role": "system",
             "content": (
                 "你是一致性检查器。检查剧情和 state_patch 是否违反已有存档，重点检查人物关系、心情、目标、位置、世界状态是否自洽。"
-                "state_patch 只应包含角色、世界和玩家选项相关字段。只输出 JSON。"
+                "state_patch 只应包含角色、世界和玩家选项相关字段。"
+                f"{JSON_ONLY_RULE}"
             ),
         },
         {
@@ -305,7 +320,9 @@ def build_lore_messages(text: str) -> list[dict[str, str]]:
             "role": "system",
             "content": (
                 "你是世界观资料整理器。把用户输入的自然语言设定整理成 WorldLore JSON。不能擅自扩写太多。"
-                "不自动保存，只返回整理结果。输出字段: title, category, content, canon_level, importance。"
+                "不自动保存，只返回整理结果。"
+                f"{JSON_ONLY_RULE}"
+                "JSON 字段: title, category, content, canon_level, importance。"
             ),
         },
         {"role": "user", "content": text},
@@ -320,7 +337,8 @@ def build_management_messages(context: dict[str, Any], message: str, scope: str 
             "content": (
                 "你是 NarrativeAgent 的存档管理智能体，不负责剧情生成。你只帮助用户讨论和修改当前存档及其下属数据。"
                 "你可以读取当前上下文，解释修改建议，并输出 proposed_actions。你不能直接修改数据库，不能生成任意 SQL，"
-                "只能生成白名单 action。所有修改必须等待用户确认后由后端执行。输出 JSON。"
+                "只能生成白名单 action。所有修改必须等待用户确认后由后端执行。"
+                f"{JSON_ONLY_RULE}"
                 "你需要先和用户讨论需求；如果信息不足，reply 里先提出问题，proposed_actions 为空。"
                 "当用户意图明确时，输出 proposed_actions。"
                 "proposed_actions 必须是 JSON 数组，不要把数组或 action 对象再编码成字符串。"

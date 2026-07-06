@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from datetime import datetime
@@ -22,6 +23,14 @@ from rag_service import attach_retrieved_memories, store_turn_memory
 STATE_SYNC_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="state-sync")
 STATE_HINT_START = "<STATE_HINT>"
 STATE_HINT_END = "</STATE_HINT>"
+STATE_HINT_OPEN_RE = re.compile(r"<\s*(?:dummy_)?state[_-]?hint\s*>", re.IGNORECASE)
+STATE_HINT_CLOSE_RE = re.compile(r"<\s*/\s*(?:dummy_)?state[_-]?hint\s*>", re.IGNORECASE)
+STATE_HINT_BLOCK_RE = re.compile(
+    r"<\s*(?:dummy_)?state[_-]?hint\s*>(.*?)<\s*/\s*(?:dummy_)?state[_-]?hint\s*>",
+    re.IGNORECASE | re.DOTALL,
+)
+STATE_HINT_TAG_RE = re.compile(r"</?\s*(?:dummy_)?state[_-]?hint\s*>", re.IGNORECASE)
+STREAM_TAG_KEEP_CHARS = 32
 
 
 def _model_dump(record) -> dict:
@@ -211,16 +220,38 @@ def _parse_state_hint_text(text: str) -> dict:
     return data if isinstance(data, dict) else {}
 
 
+def _strip_internal_story_tags(text: str) -> str:
+    if not text:
+        return ""
+    without_blocks = STATE_HINT_BLOCK_RE.sub("", text)
+    return STATE_HINT_TAG_RE.sub("", without_blocks).strip()
+
+
 def _split_visible_story_and_hint(text: str) -> tuple[str, dict]:
-    start = text.find(STATE_HINT_START)
-    if start < 0:
-        return text, {}
-    end = text.find(STATE_HINT_END, start + len(STATE_HINT_START))
-    if end < 0:
-        return text[:start].strip(), _parse_state_hint_text(text[start + len(STATE_HINT_START):])
-    visible = (text[:start] + text[end + len(STATE_HINT_END):]).strip()
-    hint_text = text[start + len(STATE_HINT_START):end]
-    return visible, _parse_state_hint_text(hint_text)
+    if not text:
+        return "", {}
+
+    hints: list[dict] = []
+
+    def remove_hint_block(match: re.Match) -> str:
+        hint = _parse_state_hint_text(match.group(1))
+        if hint:
+            hints.append(hint)
+        return ""
+
+    visible = STATE_HINT_BLOCK_RE.sub(remove_hint_block, text)
+    open_match = STATE_HINT_OPEN_RE.search(visible)
+    if open_match:
+        hint = _parse_state_hint_text(visible[open_match.end():])
+        if hint:
+            hints.append(hint)
+        visible = visible[:open_match.start()]
+
+    return _strip_internal_story_tags(visible), (hints[0] if hints else {})
+
+
+def _clean_visible_chunk(text: str) -> str:
+    return _strip_internal_story_tags(text)
 
 
 def _iter_visible_chunks_with_hint(raw_chunks, hint_box: dict):
@@ -231,30 +262,30 @@ def _iter_visible_chunks_with_hint(raw_chunks, hint_box: dict):
         buffer += raw
         while buffer:
             if not in_hint:
-                marker_index = buffer.find(STATE_HINT_START)
-                if marker_index >= 0:
-                    visible = buffer[:marker_index]
+                marker = STATE_HINT_OPEN_RE.search(buffer)
+                if marker:
+                    visible = _clean_visible_chunk(buffer[: marker.start()])
                     if visible:
                         yield visible
-                    buffer = buffer[marker_index + len(STATE_HINT_START):]
+                    buffer = buffer[marker.end():]
                     in_hint = True
                     continue
-                keep = len(STATE_HINT_START) - 1
+                keep = STREAM_TAG_KEEP_CHARS
                 if len(buffer) <= keep:
                     break
-                visible = buffer[:-keep]
+                visible = _clean_visible_chunk(buffer[:-keep])
                 buffer = buffer[-keep:]
                 if visible:
                     yield visible
                 break
 
-            end_index = buffer.find(STATE_HINT_END)
-            if end_index >= 0:
-                hint_parts.append(buffer[:end_index])
-                buffer = buffer[end_index + len(STATE_HINT_END):]
+            end_marker = STATE_HINT_CLOSE_RE.search(buffer)
+            if end_marker:
+                hint_parts.append(buffer[: end_marker.start()])
+                buffer = buffer[end_marker.end():]
                 in_hint = False
                 continue
-            keep = len(STATE_HINT_END) - 1
+            keep = STREAM_TAG_KEEP_CHARS
             if len(buffer) <= keep:
                 break
             hint_parts.append(buffer[:-keep])
@@ -264,7 +295,9 @@ def _iter_visible_chunks_with_hint(raw_chunks, hint_box: dict):
     if in_hint:
         hint_parts.append(buffer)
     elif buffer:
-        yield buffer
+        visible = _clean_visible_chunk(buffer)
+        if visible:
+            yield visible
     hint_box["state_hint"] = _parse_state_hint_text("".join(hint_parts))
 
 

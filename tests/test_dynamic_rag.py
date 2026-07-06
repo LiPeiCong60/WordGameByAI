@@ -592,6 +592,29 @@ class DynamicRagTests(unittest.TestCase):
         self.assertEqual("".join(chunks), "许晚看着你，声音低了一点。")
         self.assertEqual(hint_box["state_hint"]["updated_characters"][0]["name"], "许晚")
 
+    def test_visible_story_strips_internal_state_hint_tag_fragments(self) -> None:
+        visible, hint = game_engine._split_visible_story_and_hint("[他走进走廊的黑暗里。]</dummy_state_hint>")
+
+        self.assertEqual(visible, "[他走进走廊的黑暗里。]")
+        self.assertEqual(hint, {})
+
+    def test_stream_parser_extracts_dummy_state_hint_without_visible_leak(self) -> None:
+        hint_box = {}
+        chunks = list(
+            game_engine._iter_visible_chunks_with_hint(
+                [
+                    "[他走",
+                    "进走廊的黑暗里。]<dummy_state_hint>",
+                    "{\"current_state_update\":\"当前时间:深夜\",\"updated_characters\":[]}",
+                    "</dummy_state_hint>",
+                ],
+                hint_box,
+            )
+        )
+
+        self.assertEqual("".join(chunks), "[他走进走廊的黑暗里。]")
+        self.assertEqual(hint_box["state_hint"]["current_state_update"], "当前时间:深夜")
+
     def test_async_state_update_finalize_applies_real_patch(self) -> None:
         with make_session() as db:
             game = seed_game(db)
