@@ -187,10 +187,21 @@ function splitLongParagraph(part) {
 function storySegments(text) {
   const segments = []
   for (const part of paragraphs(text)) {
-    const roleSegment = parseRoleSegment(part)
-    pushSegment(segments, roleSegment || { type: 'narration', lines: [part] })
+    for (const segment of parseParagraphSegments(part)) {
+      pushSegment(segments, segment)
+    }
   }
   return segments
+}
+
+function parseParagraphSegments(part) {
+  const roleSegment = parseRoleSegment(part)
+  if (roleSegment) return [roleSegment]
+
+  const mixed = splitLeadingNarrationAndDialogue(part)
+  if (mixed) return mixed
+
+  return [{ type: 'narration', lines: [part] }]
 }
 
 function parseRoleSegment(part) {
@@ -203,6 +214,41 @@ function parseRoleSegment(part) {
   }
 
   return null
+}
+
+function splitLeadingNarrationAndDialogue(part) {
+  const extracted = extractLeadingWrappedText(part)
+  if (!extracted) return null
+
+  const roleSegment = parseRoleSegment(extracted.rest)
+  if (!roleSegment) return null
+
+  return [
+    { type: 'narration', lines: [extracted.narration] },
+    roleSegment,
+  ]
+}
+
+function extractLeadingWrappedText(part) {
+  const pairs = { '[': ']', '【': '】', '（': '）', '(': ')' }
+  let rest = part.trim()
+  let narration = ''
+
+  while (rest) {
+    const open = rest[0]
+    const close = pairs[open]
+    if (!close) break
+
+    const closeIndex = rest.indexOf(close, 1)
+    if (closeIndex < 0) break
+
+    const wrapped = rest.slice(0, closeIndex + 1).trim()
+    narration = narration ? `${narration}${wrapped}` : wrapped
+    rest = rest.slice(closeIndex + 1).trim()
+  }
+
+  if (!narration || !rest) return null
+  return { narration, rest }
 }
 
 function normalizeSpeaker(speaker) {
