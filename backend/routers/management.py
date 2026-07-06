@@ -6,6 +6,7 @@ from sqlmodel import Session, select
 import crud
 from auth_service import get_current_user, require_game_access, require_record_game_access
 from database import get_session
+from llm_client import reset_current_llm_user, set_current_llm_user
 from message_quota_service import require_message_quota
 from management_service import (
     apply_management_proposal,
@@ -61,7 +62,11 @@ def chat(session_id: int, payload: ManagementChatRequest, db: Session = Depends(
     session = crud.get_or_404(db, ManagementSession, session_id, "管理会话")
     require_management_record_access(session, user, db)
     require_message_quota(db, user)
-    return run_management_chat(session_id, payload.message, db, payload.scope, user)
+    token = set_current_llm_user(user.id)
+    try:
+        return run_management_chat(session_id, payload.message, db, payload.scope, user)
+    finally:
+        reset_current_llm_user(token)
 
 
 @router.get("/management/proposals/{proposal_id}")

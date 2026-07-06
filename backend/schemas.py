@@ -66,6 +66,37 @@ class AdminUserUpdate(FlexibleModel):
     daily_message_limit: Optional[int] = None
 
 
+class AdminModelConfigUpsert(FlexibleModel):
+    id: str
+    label: str = ""
+    base_url: str = ""
+    model: str = ""
+    api_key: str = ""
+    clear_api_key: bool = False
+    temperature: float = 0.7
+    enabled: bool = True
+
+
+class AdminModelLevelUpsert(FlexibleModel):
+    id: str
+    label: str = ""
+    description: str = ""
+    fallback_model_id: str = ""
+    agent_models: dict[str, str] = Field(default_factory=dict)
+
+
+class AdminDefaultModelUpdate(FlexibleModel):
+    model_id: str = ""
+
+
+class AdminDefaultLevelUpdate(FlexibleModel):
+    level_id: str = ""
+
+
+class AdminUserModelLevelUpdate(FlexibleModel):
+    level_id: str = ""
+
+
 class GameUpdate(FlexibleModel):
     title: Optional[str] = None
     genre: Optional[str] = None

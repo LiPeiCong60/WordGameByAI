@@ -11,6 +11,7 @@ def run_narrator_agent(context: dict, user_input: str, protagonist_turn: dict, n
     raw = call_llm(
         build_narrator_messages(context, user_input, protagonist_turn, npc_reactions),
         response_format={"type": "json_object"},
+        agent_name="NarratorAgent",
     )
     data = safe_json_loads(raw, default={})
     if "error" in data:
@@ -19,4 +20,7 @@ def run_narrator_agent(context: dict, user_input: str, protagonist_turn: dict, n
 
 
 def run_narrator_stream_agent(context: dict, user_input: str, protagonist_turn: dict, npc_reactions: dict) -> Iterator[str]:
-    yield from call_llm_stream(build_narrator_stream_messages(context, user_input, protagonist_turn, npc_reactions))
+    yield from call_llm_stream(
+        build_narrator_stream_messages(context, user_input, protagonist_turn, npc_reactions),
+        agent_name="NarratorStreamAgent",
+    )

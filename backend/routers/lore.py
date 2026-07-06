@@ -7,6 +7,7 @@ import crud
 from agents.lore_agent import run_lore_agent
 from auth_service import get_current_user, require_game_access, require_record_game_access
 from database import get_session
+from llm_client import reset_current_llm_user, set_current_llm_user
 from models import User, WorldLore
 from schemas import LoreCreate, LoreOrganizeRequest, LoreUpdate
 
@@ -49,4 +50,8 @@ def delete_lore(lore_id: int, db: Session = Depends(get_session), user: User = D
 @router.post("/games/{game_id}/lore/organize")
 def organize_lore(game_id: int, payload: LoreOrganizeRequest, db: Session = Depends(get_session), user: User = Depends(get_current_user)):
     require_game_access(db, game_id, user)
-    return run_lore_agent(payload.text)
+    token = set_current_llm_user(user.id)
+    try:
+        return run_lore_agent(payload.text)
+    finally:
+        reset_current_llm_user(token)

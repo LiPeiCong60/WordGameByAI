@@ -118,6 +118,7 @@ cp backend/.env.example backend/.env
 OPENAI_API_KEY=your_api_key_here
 OPENAI_BASE_URL=https://api.openai.com/v1
 OPENAI_MODEL=gpt-4o-mini
+MODEL_CONFIG_FILE=./model_configs.json
 DATABASE_URL=sqlite:///./narrative_agent.db
 CORS_ALLOW_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
 AUTH_TOKEN_TTL_DAYS=14
@@ -172,6 +173,7 @@ VITE_API_BASE_URL=http://localhost:8000/api npm run dev
 OPENAI_API_KEY=your_api_key_here
 OPENAI_BASE_URL=https://api.openai.com/v1
 OPENAI_MODEL=gpt-4o-mini
+MODEL_CONFIG_FILE=./model_configs.json
 DATABASE_URL=sqlite:///./narrative_agent.db
 CORS_ALLOW_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
 AUTH_TOKEN_TTL_DAYS=14
@@ -182,6 +184,7 @@ AUTH_TOKEN_TTL_DAYS=14
 | `OPENAI_API_KEY` | 大模型 API Key。真实密钥只放本地 `.env`，不要提交到 Git。 | 调用 Agent 时必填 |
 | `OPENAI_BASE_URL` | OpenAI-compatible API 地址，可接入兼容 OpenAI 协议的模型服务。 | 否，默认 OpenAI API |
 | `OPENAI_MODEL` | 使用的模型名称。 | 否，默认 `gpt-4o-mini` |
+| `MODEL_CONFIG_FILE` | 管理后台写入的模型池、模型等级和私有 API Key 配置文件路径。接口只返回 `has_api_key`，不会返回密钥内容。 | 否，默认 `backend/model_configs.json` |
 | `DATABASE_URL` | SQLModel 数据库连接地址。 | 否，默认本地 SQLite |
 | `CORS_ALLOW_ORIGINS` | 允许访问后端 API 的前端域名，公网部署时必须改成你的 HTTPS 域名。 | 否，本地开发地址 |
 | `AUTH_TOKEN_TTL_DAYS` | 登录 token 有效天数。 | 否，默认 `14` |
@@ -204,6 +207,10 @@ AUTH_TOKEN_TTL_DAYS=14
 | `GET` | `/api/admin/summary` | 管理后台统计 | 管理员权限 |
 | `GET` | `/api/admin/users` | 管理后台用户列表 | 管理员权限 |
 | `PATCH` | `/api/admin/users/{user_id}` | 启停用户、授予或取消管理员权限 | 管理员权限 |
+| `PATCH` | `/api/admin/users/{user_id}/model-level` | 给用户分配模型等级 | 管理员权限 |
+| `GET` | `/api/admin/model-config` | 获取模型池、模型等级和分配关系，不返回 API Key 明文 | 管理员权限 |
+| `PUT` | `/api/admin/model-config/models` | 新增或更新模型配置，API Key 写入服务器私有配置文件 | 管理员权限 |
+| `PUT` | `/api/admin/model-config/levels` | 新增或更新模型等级，每个等级可为不同 Agent 指定模型 | 管理员权限 |
 | `GET` | `/api/admin/games` | 管理后台存档列表 | 管理员权限 |
 | `POST` | `/api/games` | 创建游戏存档 | Body: `GameCreate`，可传 `template_id` |
 | `GET` | `/api/games` | 获取存档列表 | 无 |
@@ -248,7 +255,7 @@ AUTH_TOKEN_TTL_DAYS=14
 - 管理员可以查看后台统计、用户列表和所有存档列表。
 - 公共模板 `owner_user_id = null`，所有用户可见；管理员创建的是公共模板。
 - 普通用户创建的模板带有自己的 `owner_user_id`，只有自己和管理员可见。
-- 真实 `.env`、本地 SQLite 数据库、上传头像、构建产物和依赖目录都被 `.gitignore` 排除，不应提交到 GitHub。
+- 真实 `.env`、`backend/model_configs.json`、本地 SQLite 数据库、上传头像、构建产物和依赖目录都被 `.gitignore` 排除，不应提交到 GitHub。
 
 ## 公网部署
 
@@ -257,7 +264,7 @@ AUTH_TOKEN_TTL_DAYS=14
 - 后端只监听内网地址，例如 `127.0.0.1:8010`，不要把后端端口直接暴露公网。
 - 用 Nginx / Caddy 通过 `/api` 反向代理到 FastAPI，通过 `/uploads` 提供上传资源。
 - 前端构建时设置 `VITE_API_BASE_URL=https://你的域名/api`。
-- 生产环境只在服务器私有 `.env` 中配置真实 `OPENAI_API_KEY`。
+- 生产环境只在服务器私有 `.env` 或后台生成的 `backend/model_configs.json` 中保存真实模型 API Key；前端不会通过接口读取到密钥明文。
 - 正式多人使用建议从 SQLite 迁移到 PostgreSQL，并配置备份。
 
 ### TurnRequest 示例

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import tempfile
 import unittest
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -14,6 +15,7 @@ sys.path.insert(0, str(BACKEND))
 
 import game_engine
 import message_quota_service
+import model_config_service
 import routers.admin as admin_router
 import routers.management as management_router
 import routers.templates as templates_router
@@ -254,6 +256,55 @@ class DynamicRagTests(unittest.TestCase):
             listed_after_member = {item["id"]: item for item in admin_router.list_users(admin, db)}
             self.assertTrue(listed_after_member[normal.id]["is_member"])
             self.assertEqual(listed_after_member[normal.id]["daily_message_limit"], 30)
+
+    def test_model_levels_route_agents_without_exposing_api_keys(self) -> None:
+        old_path = model_config_service.CONFIG_PATH
+        with tempfile.TemporaryDirectory() as temp_dir:
+            try:
+                model_config_service.CONFIG_PATH = Path(temp_dir) / "model_configs.json"
+                model_config_service.upsert_model(
+                    {
+                        "id": "cheap",
+                        "label": "便宜模型",
+                        "base_url": "https://api.example.com",
+                        "model": "cheap-chat",
+                        "api_key": "fixture-cheap-value",
+                    }
+                )
+                model_config_service.upsert_model(
+                    {
+                        "id": "strong",
+                        "label": "强模型",
+                        "base_url": "https://api.example.com",
+                        "model": "strong-chat",
+                        "api_key": "fixture-strong-value",
+                    }
+                )
+                model_config_service.upsert_level(
+                    {
+                        "id": "vip",
+                        "label": "会员档",
+                        "fallback_model_id": "cheap",
+                        "agent_models": {"NarratorStreamAgent": "strong"},
+                    }
+                )
+                model_config_service.set_default_level("vip")
+                model_config_service.set_user_level(2, "vip")
+
+                public_config = model_config_service.public_model_config()
+                public_text = str(public_config)
+                self.assertNotIn("fixture-cheap-value", public_text)
+                self.assertNotIn("fixture-strong-value", public_text)
+                self.assertTrue(any(item["id"] == "cheap" and item["has_api_key"] for item in public_config["models"]))
+
+                narrator_config = model_config_service.resolve_model_config("NarratorStreamAgent", user_id=2)
+                checker_config = model_config_service.resolve_model_config("CheckerAgent", user_id=2)
+                self.assertEqual(narrator_config["id"], "strong")
+                self.assertEqual(narrator_config["api_key"], "fixture-strong-value")
+                self.assertEqual(checker_config["id"], "cheap")
+                self.assertEqual(checker_config["api_key"], "fixture-cheap-value")
+            finally:
+                model_config_service.CONFIG_PATH = old_path
 
     def test_default_templates_include_all_starter_character_fields(self) -> None:
         for template in DEFAULT_TEMPLATES:

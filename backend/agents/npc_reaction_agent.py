@@ -25,6 +25,7 @@ def run_npc_reaction_agent(context: dict, user_input: str, protagonist_turn: dic
     raw = call_llm(
         build_npc_reaction_messages(agent_context, user_input, protagonist_turn),
         response_format={"type": "json_object"},
+        agent_name="NPCReactionAgent",
     )
     data = safe_json_loads(raw, default={})
     if "error" in data:

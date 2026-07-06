@@ -6,7 +6,11 @@ from prompt_builder import build_management_messages
 
 
 def run_management_agent(context: dict, message: str, scope: str = "") -> dict:
-    raw = call_llm(build_management_messages(context, message, scope), response_format={"type": "json_object"})
+    raw = call_llm(
+        build_management_messages(context, message, scope),
+        response_format={"type": "json_object"},
+        agent_name="ManagementAgent",
+    )
     data = safe_json_loads(raw, default={})
     if "error" in data:
         return {

@@ -6,7 +6,11 @@ from prompt_builder import build_protagonist_messages
 
 
 def run_protagonist_agent(context: dict, user_input: str) -> dict:
-    raw = call_llm(build_protagonist_messages(context, user_input), response_format={"type": "json_object"})
+    raw = call_llm(
+        build_protagonist_messages(context, user_input),
+        response_format={"type": "json_object"},
+        agent_name="ProtagonistAgent",
+    )
     data = safe_json_loads(raw, default={})
     if "error" in data:
         fallback = _fallback_protagonist_turn(context, user_input)

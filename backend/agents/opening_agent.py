@@ -8,7 +8,11 @@ from prompt_builder import build_opening_messages, build_opening_stream_messages
 
 
 def run_opening_agent(context: dict) -> dict:
-    raw = call_llm(build_opening_messages(context), response_format={"type": "json_object"})
+    raw = call_llm(
+        build_opening_messages(context),
+        response_format={"type": "json_object"},
+        agent_name="OpeningAgent",
+    )
     data = safe_json_loads(raw, default={})
     if "error" in data:
         return {"visible_story": f"无法生成开场白：{data['error']}"}
@@ -16,4 +20,4 @@ def run_opening_agent(context: dict) -> dict:
 
 
 def run_opening_stream_agent(context: dict) -> Iterator[str]:
-    yield from call_llm_stream(build_opening_stream_messages(context))
+    yield from call_llm_stream(build_opening_stream_messages(context), agent_name="OpeningStreamAgent")

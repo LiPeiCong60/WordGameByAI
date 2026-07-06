@@ -9,6 +9,7 @@ from sqlmodel import Session
 from auth_service import get_current_user, require_game_access
 from database import get_session
 from game_engine import run_game_turn, run_game_turn_stream, run_opening_turn, run_opening_turn_stream
+from llm_client import reset_current_llm_user, set_current_llm_user
 from message_quota_service import require_message_quota
 from models import TurnLog, User
 from schemas import TurnRequest
@@ -17,18 +18,37 @@ from turn_history_service import delete_turns_from, get_turn_for_action, regener
 router = APIRouter()
 
 
+def _run_with_llm_user(user: User, fn):
+    token = set_current_llm_user(user.id)
+    try:
+        return fn()
+    finally:
+        reset_current_llm_user(token)
+
+
+def _stream_with_llm_user(user: User, events):
+    token = set_current_llm_user(user.id)
+    try:
+        yield from events
+    finally:
+        reset_current_llm_user(token)
+
+
 @router.post("/games/{game_id}/turn")
 def create_turn(game_id: int, payload: TurnRequest, db: Session = Depends(get_session), user: User = Depends(get_current_user)):
     require_game_access(db, game_id, user)
     require_message_quota(db, user)
     try:
-        return run_game_turn(
-            game_id,
-            payload.effective_user_input(),
-            db,
-            fast_mode=payload.fast_mode,
-            skip_state_update=payload.skip_state_update,
-            async_state_update=payload.async_state_update,
+        return _run_with_llm_user(
+            user,
+            lambda: run_game_turn(
+                game_id,
+                payload.effective_user_input(),
+                db,
+                fast_mode=payload.fast_mode,
+                skip_state_update=payload.skip_state_update,
+                async_state_update=payload.async_state_update,
+            ),
         )
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -50,13 +70,16 @@ def create_turn_stream(game_id: int, payload: TurnRequest, db: Session = Depends
     require_message_quota(db, user)
     return StreamingResponse(
         _stream_json_events(
-            run_game_turn_stream(
-                game_id,
-                payload.effective_user_input(),
-                db,
-                fast_mode=payload.fast_mode,
-                skip_state_update=payload.skip_state_update,
-                async_state_update=payload.async_state_update,
+            _stream_with_llm_user(
+                user,
+                run_game_turn_stream(
+                    game_id,
+                    payload.effective_user_input(),
+                    db,
+                    fast_mode=payload.fast_mode,
+                    skip_state_update=payload.skip_state_update,
+                    async_state_update=payload.async_state_update,
+                ),
             )
         ),
         media_type="application/x-ndjson",
@@ -68,7 +91,7 @@ def create_opening(game_id: int, db: Session = Depends(get_session), user: User 
     require_game_access(db, game_id, user)
     require_message_quota(db, user)
     try:
-        return run_opening_turn(game_id, db)
+        return _run_with_llm_user(user, lambda: run_opening_turn(game_id, db))
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
@@ -78,7 +101,7 @@ def create_opening_stream(game_id: int, db: Session = Depends(get_session), user
     require_game_access(db, game_id, user)
     require_message_quota(db, user)
     return StreamingResponse(
-        _stream_json_events(run_opening_turn_stream(game_id, db)),
+        _stream_json_events(_stream_with_llm_user(user, run_opening_turn_stream(game_id, db))),
         media_type="application/x-ndjson",
     )
 
@@ -107,7 +130,7 @@ def regenerate_existing_turn(
     turn = get_turn_for_action(turn_id, db, game_id=game_id, turn_number=turn_number)
     require_game_access(db, turn.game_id, user)
     require_message_quota(db, user)
-    return regenerate_turn(turn_id, db, game_id=game_id, turn_number=turn_number)
+    return _run_with_llm_user(user, lambda: regenerate_turn(turn_id, db, game_id=game_id, turn_number=turn_number))
 
 
 @router.post("/turns/{turn_id}/regenerate/stream")
@@ -132,4 +155,4 @@ def regenerate_existing_turn_stream(
         else:
             yield from run_opening_turn_stream(game_id, db)
 
-    return StreamingResponse(_stream_json_events(events()), media_type="application/x-ndjson")
+    return StreamingResponse(_stream_json_events(_stream_with_llm_user(user, events())), media_type="application/x-ndjson")

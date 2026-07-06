@@ -22,6 +22,13 @@
             {{ quotaLabel(user) }}
           </em>
           <span>{{ usageLabel(user) }}</span>
+          <label class="compact-field model-level-field">
+            <span>模型等级</span>
+            <select :value="user.model_level_id || ''" :disabled="pendingUserId === user.id" @change="saveUserModelLevel(user, $event.target.value)">
+              <option value="">默认等级</option>
+              <option v-for="level in modelConfig.levels" :key="level.id" :value="level.id">{{ level.label || level.id }}</option>
+            </select>
+          </label>
           <span v-if="pendingUserId === user.id">正在保存...</span>
           <label class="compact-field">
             <span>每日上限</span>
@@ -32,6 +39,61 @@
             <button type="button" :disabled="pendingUserId === user.id" @click="toggleUserAdmin(user)">{{ user.is_admin ? '取消管理员' : '设为管理员' }}</button>
             <button type="button" :disabled="pendingUserId === user.id" @click="toggleUserMember(user)">{{ user.is_member ? '取消会员' : '设为会员' }}</button>
             <button type="button" :disabled="pendingUserId === user.id" @click="saveUserQuota(user)">{{ quotaSaveLabel(user) }}</button>
+          </div>
+        </article>
+      </div>
+
+      <h2 class="section-title">模型池</h2>
+      <form class="admin-form" @submit.prevent="saveModel">
+        <label class="field"><span>配置 ID</span><input v-model.trim="modelForm.id" required placeholder="deepseek_chat" /></label>
+        <label class="field"><span>显示名称</span><input v-model.trim="modelForm.label" placeholder="DeepSeek Chat" /></label>
+        <label class="field"><span>Base URL</span><input v-model.trim="modelForm.base_url" placeholder="https://api.deepseek.com" /></label>
+        <label class="field"><span>模型名</span><input v-model.trim="modelForm.model" placeholder="deepseek-chat" /></label>
+        <label class="field"><span>Temperature</span><input v-model.number="modelForm.temperature" type="number" min="0" max="2" step="0.1" /></label>
+        <label class="field"><span>API Key</span><input v-model.trim="modelForm.api_key" type="password" autocomplete="new-password" placeholder="留空则保留服务器现有密钥" /></label>
+        <label class="check-field"><input v-model="modelForm.enabled" type="checkbox" />启用</label>
+        <label class="check-field"><input v-model="modelForm.clear_api_key" type="checkbox" />清除已保存密钥</label>
+        <button type="submit" class="primary">保存模型配置</button>
+      </form>
+      <div class="admin-list">
+        <article v-for="model in modelConfig.models" :key="model.id">
+          <strong>{{ model.label || model.id }}</strong>
+          <span>{{ model.model || '-' }} · {{ model.base_url || '-' }}</span>
+          <em>{{ model.enabled ? '启用' : '停用' }} · {{ model.has_api_key ? '已配置密钥' : '未配置密钥' }}</em>
+          <div class="inline-actions">
+            <button type="button" @click="editModel(model)">编辑</button>
+            <button type="button" @click="saveDefaultModel(model.id)">{{ modelConfig.default_model_id === model.id ? '全局默认' : '设为兜底模型' }}</button>
+            <button type="button" @click="removeModel(model)">删除</button>
+          </div>
+        </article>
+      </div>
+
+      <h2 class="section-title">模型等级 / Agent 分配</h2>
+      <form class="admin-form level-form" @submit.prevent="saveLevel">
+        <label class="field"><span>等级 ID</span><input v-model.trim="levelForm.id" required placeholder="free" /></label>
+        <label class="field"><span>等级名称</span><input v-model.trim="levelForm.label" placeholder="普通用户档" /></label>
+        <label class="field"><span>兜底模型</span><select v-model="levelForm.fallback_model_id"><option value="">使用全局兜底</option><option v-for="model in modelConfig.models" :key="model.id" :value="model.id">{{ model.label || model.id }}</option></select></label>
+        <label class="field wide"><span>说明</span><textarea v-model.trim="levelForm.description" rows="2" /></label>
+        <div class="agent-model-grid wide">
+          <label v-for="agent in modelConfig.agent_names" :key="agent" class="field">
+            <span>{{ agent }}</span>
+            <select v-model="levelForm.agent_models[agent]">
+              <option value="">使用等级兜底</option>
+              <option v-for="model in modelConfig.models" :key="model.id" :value="model.id">{{ model.label || model.id }}</option>
+            </select>
+          </label>
+        </div>
+        <button type="submit" class="primary">保存等级</button>
+      </form>
+      <div class="admin-list">
+        <article v-for="level in modelConfig.levels" :key="level.id">
+          <strong>{{ level.label || level.id }}</strong>
+          <span>{{ level.description || '未填写说明' }}</span>
+          <em>兜底：{{ modelLabel(level.fallback_model_id) }} · Agent 覆盖 {{ Object.keys(level.agent_models || {}).length }} 个</em>
+          <div class="inline-actions">
+            <button type="button" @click="editLevel(level)">编辑</button>
+            <button type="button" @click="saveDefaultLevel(level.id)">{{ modelConfig.default_level_id === level.id ? '默认等级' : '设为默认等级' }}</button>
+            <button type="button" @click="removeLevel(level)">删除</button>
           </div>
         </article>
       </div>
@@ -53,7 +115,20 @@
 <script setup>
 import { onMounted, ref } from 'vue'
 import { RefreshCw } from 'lucide-vue-next'
-import { getAdminSummary, listAdminGames, listAdminUsers, updateAdminUser } from '../api/admin'
+import {
+  deleteAdminModel,
+  deleteAdminModelLevel,
+  getAdminModelConfig,
+  getAdminSummary,
+  listAdminGames,
+  listAdminUsers,
+  saveAdminModel,
+  saveAdminModelLevel,
+  setAdminDefaultLevel,
+  setAdminDefaultModel,
+  updateAdminUser,
+  updateAdminUserModelLevel
+} from '../api/admin'
 import { useUiStore } from '../stores/uiStore'
 
 const ui = useUiStore()
@@ -62,10 +137,14 @@ const users = ref([])
 const games = ref([])
 const quotaDrafts = ref({})
 const pendingUserId = ref(null)
+const modelConfig = ref({ models: [], levels: [], agent_names: [], user_levels: {} })
+const modelForm = ref(emptyModelForm())
+const levelForm = ref(emptyLevelForm())
 
 async function load() {
   await ui.run(async () => {
     summary.value = await getAdminSummary()
+    modelConfig.value = await getAdminModelConfig()
     users.value = await listAdminUsers()
     quotaDrafts.value = Object.fromEntries(users.value.map((user) => [user.id, user.daily_message_limit ?? 20]))
     games.value = await listAdminGames()
@@ -115,6 +194,92 @@ async function saveUserQuota(user) {
   await updateUser(user, data)
 }
 
+async function saveUserModelLevel(user, levelId) {
+  pendingUserId.value = user.id
+  try {
+    await ui.run(async () => {
+      await updateAdminUserModelLevel(user.id, levelId)
+      modelConfig.value = await getAdminModelConfig()
+      users.value = await listAdminUsers()
+    })
+  } finally {
+    pendingUserId.value = null
+  }
+}
+
+async function saveModel() {
+  await ui.run(async () => {
+    await saveAdminModel(modelForm.value)
+    modelConfig.value = await getAdminModelConfig()
+    users.value = await listAdminUsers()
+    modelForm.value = emptyModelForm()
+  })
+}
+
+async function removeModel(model) {
+  if (!window.confirm(`确定删除模型配置 ${model.label || model.id}？`)) return
+  await ui.run(async () => {
+    await deleteAdminModel(model.id)
+    modelConfig.value = await getAdminModelConfig()
+  })
+}
+
+async function saveDefaultModel(modelId) {
+  await ui.run(async () => {
+    modelConfig.value = await setAdminDefaultModel(modelId)
+  })
+}
+
+function editModel(model) {
+  modelForm.value = {
+    id: model.id,
+    label: model.label || '',
+    base_url: model.base_url || '',
+    model: model.model || '',
+    api_key: '',
+    clear_api_key: false,
+    temperature: Number(model.temperature ?? 0.7),
+    enabled: Boolean(model.enabled)
+  }
+}
+
+async function saveLevel() {
+  await ui.run(async () => {
+    await saveAdminModelLevel({
+      ...levelForm.value,
+      agent_models: cleanAgentModels(levelForm.value.agent_models)
+    })
+    modelConfig.value = await getAdminModelConfig()
+    users.value = await listAdminUsers()
+    levelForm.value = emptyLevelForm()
+  })
+}
+
+async function removeLevel(level) {
+  if (!window.confirm(`确定删除模型等级 ${level.label || level.id}？`)) return
+  await ui.run(async () => {
+    await deleteAdminModelLevel(level.id)
+    modelConfig.value = await getAdminModelConfig()
+    users.value = await listAdminUsers()
+  })
+}
+
+async function saveDefaultLevel(levelId) {
+  await ui.run(async () => {
+    modelConfig.value = await setAdminDefaultLevel(levelId)
+  })
+}
+
+function editLevel(level) {
+  levelForm.value = {
+    id: level.id,
+    label: level.label || '',
+    description: level.description || '',
+    fallback_model_id: level.fallback_model_id || '',
+    agent_models: { ...(level.agent_models || {}) }
+  }
+}
+
 function quotaLabel(user) {
   if (user.is_admin) return '不限额'
   const effective = resolveEffectiveLimit(user)
@@ -160,6 +325,39 @@ function matchesExpectedUpdate(user, data) {
     Number(user.daily_message_limit) !== Number(data.daily_message_limit)
   ) return false
   return true
+}
+
+function emptyModelForm() {
+  return {
+    id: '',
+    label: '',
+    base_url: '',
+    model: '',
+    api_key: '',
+    clear_api_key: false,
+    temperature: 0.7,
+    enabled: true
+  }
+}
+
+function emptyLevelForm() {
+  return {
+    id: '',
+    label: '',
+    description: '',
+    fallback_model_id: '',
+    agent_models: {}
+  }
+}
+
+function cleanAgentModels(agentModels) {
+  return Object.fromEntries(Object.entries(agentModels || {}).filter(([, value]) => Boolean(value)))
+}
+
+function modelLabel(modelId) {
+  if (!modelId) return '全局兜底'
+  const model = modelConfig.value.models.find((item) => item.id === modelId)
+  return model?.label || modelId
 }
 
 onMounted(load)

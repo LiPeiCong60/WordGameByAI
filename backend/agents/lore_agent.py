@@ -6,7 +6,7 @@ from prompt_builder import build_lore_messages
 
 
 def run_lore_agent(text: str) -> dict:
-    raw = call_llm(build_lore_messages(text), response_format={"type": "json_object"})
+    raw = call_llm(build_lore_messages(text), response_format={"type": "json_object"}, agent_name="LoreAgent")
     data = safe_json_loads(raw, default={})
     if "error" in data:
         return {

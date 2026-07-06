@@ -18,6 +18,7 @@ def run_patch_agent(context: dict, user_input: str, npc_reactions: dict, visible
     raw = call_llm(
         build_patch_messages(context, user_input, npc_reactions, visible_story),
         response_format={"type": "json_object"},
+        agent_name="PatchAgent",
     )
     data = safe_json_loads(raw, default={})
     if "error" in data:

@@ -15,6 +15,7 @@ from agents.patch_agent import EMPTY_PATCH, run_patch_agent
 from agents.protagonist_agent import run_protagonist_agent, run_protagonist_fallback
 from export_import import export_game
 from json_utils import dump_json_field, safe_json_loads
+from llm_client import current_llm_user_id, reset_current_llm_user, set_current_llm_user
 from models import Character, Game, StoryWorld, TurnLog, TurnSnapshot, WorldLore, WorldTemplate
 from numeric_utils import as_int
 from patch_applier import apply_state_patch, format_state_text
@@ -412,11 +413,16 @@ def _run_async_state_update_job(
     user_input: str,
     npc_reactions: dict,
     visible_story: str,
+    user_id: int | None = None,
 ) -> None:
     from database import engine
 
+    token = set_current_llm_user(user_id)
     with Session(engine) as session:
-        _finalize_async_state_update(game_id, turn_id, context, user_input, npc_reactions, visible_story, session)
+        try:
+            _finalize_async_state_update(game_id, turn_id, context, user_input, npc_reactions, visible_story, session)
+        finally:
+            reset_current_llm_user(token)
 
 
 def _schedule_async_state_update(
@@ -427,6 +433,7 @@ def _schedule_async_state_update(
     npc_reactions: dict,
     visible_story: str,
 ) -> None:
+    user_id = current_llm_user_id()
     STATE_SYNC_EXECUTOR.submit(
         _run_async_state_update_job,
         game_id,
@@ -435,6 +442,7 @@ def _schedule_async_state_update(
         user_input,
         npc_reactions,
         visible_story,
+        user_id,
     )
 
 

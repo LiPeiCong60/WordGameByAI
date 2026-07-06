@@ -6,8 +6,26 @@ from sqlmodel import Session, func, select
 from auth_service import require_admin
 from database import get_session
 from message_quota_service import DEFAULT_NON_MEMBER_DAILY_LIMIT, get_today_message_usage
+from model_config_service import (
+    delete_level,
+    delete_model,
+    public_model_config,
+    set_default_level,
+    set_default_model,
+    set_user_level,
+    upsert_level,
+    upsert_model,
+    user_level_id,
+)
 from models import Game, ManagementProposal, TurnLog, User
-from schemas import AdminUserUpdate
+from schemas import (
+    AdminDefaultLevelUpdate,
+    AdminDefaultModelUpdate,
+    AdminModelConfigUpsert,
+    AdminModelLevelUpsert,
+    AdminUserModelLevelUpdate,
+    AdminUserUpdate,
+)
 
 router = APIRouter()
 
@@ -24,6 +42,7 @@ def admin_user_payload(user: User, db: Session) -> dict:
         "effective_daily_message_limit": usage["limit"],
         "today_message_count": usage["used"],
         "remaining_message_count": usage["remaining"],
+        "model_level_id": user_level_id(user.id),
         "is_active": user.is_active,
         "created_at": user.created_at,
         "last_login_at": user.last_login_at,
@@ -92,3 +111,75 @@ def list_all_games(_admin: User = Depends(require_admin), db: Session = Depends(
         }
         for game in games
     ]
+
+
+@router.get("/admin/model-config")
+def get_model_config(_admin: User = Depends(require_admin)):
+    return public_model_config()
+
+
+@router.put("/admin/model-config/models")
+def save_model_config(payload: AdminModelConfigUpsert, _admin: User = Depends(require_admin)):
+    try:
+        return upsert_model(payload.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.delete("/admin/model-config/models/{model_id}")
+def remove_model_config(model_id: str, _admin: User = Depends(require_admin)):
+    try:
+        return delete_model(model_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=f"找不到模型配置: {model_id}") from exc
+
+
+@router.patch("/admin/model-config/default-model")
+def update_default_model(payload: AdminDefaultModelUpdate, _admin: User = Depends(require_admin)):
+    try:
+        return set_default_model(payload.model_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=f"找不到模型配置: {payload.model_id}") from exc
+
+
+@router.put("/admin/model-config/levels")
+def save_model_level(payload: AdminModelLevelUpsert, _admin: User = Depends(require_admin)):
+    try:
+        return upsert_level(payload.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=f"找不到模型配置: {exc.args[0]}") from exc
+
+
+@router.delete("/admin/model-config/levels/{level_id}")
+def remove_model_level(level_id: str, _admin: User = Depends(require_admin)):
+    try:
+        return delete_level(level_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=f"找不到模型等级: {level_id}") from exc
+
+
+@router.patch("/admin/model-config/default-level")
+def update_default_level(payload: AdminDefaultLevelUpdate, _admin: User = Depends(require_admin)):
+    try:
+        return set_default_level(payload.level_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=f"找不到模型等级: {payload.level_id}") from exc
+
+
+@router.patch("/admin/users/{user_id}/model-level")
+def update_user_model_level(
+    user_id: int,
+    payload: AdminUserModelLevelUpdate,
+    _admin: User = Depends(require_admin),
+    db: Session = Depends(get_session),
+):
+    user = db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail=f"找不到用户: {user_id}")
+    try:
+        set_user_level(user_id, payload.level_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=f"找不到模型等级: {payload.level_id}") from exc
+    return admin_user_payload(user, db)
