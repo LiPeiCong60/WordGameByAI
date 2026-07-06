@@ -186,8 +186,13 @@ function splitLongParagraph(part) {
 
 function storySegments(text) {
   const segments = []
+  let activeSpeaker = null
+
   for (const part of paragraphs(text)) {
-    for (const segment of parseParagraphSegments(part)) {
+    for (const segment of parseParagraphSegments(part, activeSpeaker)) {
+      if (segment.type === 'role') {
+        activeSpeaker = segment.speaker
+      }
       pushSegment(segments, segment)
     }
   }
@@ -214,63 +219,57 @@ function splitDialogueAndNarration(speaker, content) {
   return result
 }
 
-function parseParagraphSegments(part) {
-  const roleSegment = parseRoleSegment(part)
-  if (roleSegment) {
-    return splitDialogueAndNarration(roleSegment.speaker, roleSegment.lines[0])
+function isOutsideBrackets(text) {
+  let brackets = 0
+  let parentheses = 0
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i]
+    if (char === '[' || char === '【') brackets++
+    else if (char === ']' || char === '】') brackets = Math.max(0, brackets - 1)
+    else if (char === '(' || char === '（') parentheses++
+    else if (char === ')' || char === '）') parentheses = Math.max(0, parentheses - 1)
   }
-
-  const mixed = splitLeadingNarrationAndDialogue(part)
-  if (mixed) return mixed
-
-  return [{ type: 'narration', lines: [part] }]
+  return brackets === 0 && parentheses === 0
 }
 
-function parseRoleSegment(part) {
-  if (/^[\[【（(]/u.test(part)) return null
-
-  const explicit = part.match(/^([\u4e00-\u9fa5A-Za-z0-9_·・]{1,14})(?:\s*[（(][^）)]*[）)])?\s*[：:]\s*(.+)$/)
-  if (explicit) {
-    const speaker = normalizeSpeaker(explicit[1])
-    if (isLikelySpeaker(speaker)) return { type: 'role', speaker, lines: [explicit[2].trim()] }
+function splitParagraphBySpeaker(part) {
+  const colonIndices = []
+  for (let i = 0; i < part.length; i++) {
+    if (part[i] === '：' || part[i] === ':') {
+      colonIndices.push(i)
+    }
   }
 
+  for (const index of colonIndices) {
+    const beforeColon = part.slice(0, index)
+    const afterColon = part.slice(index + 1)
+
+    const match = beforeColon.match(/([\u4e00-\u9fa5A-Za-z0-9_·・]{1,14})(?:\s*[（(][^）)]*[）)])?\s*$/u)
+    if (!match) continue
+
+    const speaker = normalizeSpeaker(match[1])
+    if (!isLikelySpeaker(speaker)) continue
+
+    const beforeSpeaker = beforeColon.slice(0, beforeColon.length - match[0].length)
+    if (!isOutsideBrackets(beforeSpeaker)) continue
+
+    const result = []
+    const beforeTrimmed = beforeSpeaker.trim()
+    if (beforeTrimmed) {
+      result.push({ type: 'narration', lines: [beforeTrimmed] })
+    }
+    result.push(...splitDialogueAndNarration(speaker, afterColon.trim()))
+    return result
+  }
   return null
 }
 
-function splitLeadingNarrationAndDialogue(part) {
-  const extracted = extractLeadingWrappedText(part)
-  if (!extracted) return null
+function parseParagraphSegments(part, activeSpeaker) {
+  const bySpeaker = splitParagraphBySpeaker(part)
+  if (bySpeaker) return bySpeaker
 
-  const roleSegment = parseRoleSegment(extracted.rest)
-  if (!roleSegment) return null
-
-  return [
-    { type: 'narration', lines: [extracted.narration] },
-    ...splitDialogueAndNarration(roleSegment.speaker, roleSegment.lines[0])
-  ]
-}
-
-function extractLeadingWrappedText(part) {
-  const pairs = { '[': ']', '【': '】', '（': '）', '(': ')' }
-  let rest = part.trim()
-  let narration = ''
-
-  while (rest) {
-    const open = rest[0]
-    const close = pairs[open]
-    if (!close) break
-
-    const closeIndex = rest.indexOf(close, 1)
-    if (closeIndex < 0) break
-
-    const wrapped = rest.slice(0, closeIndex + 1).trim()
-    narration = narration ? `${narration}${wrapped}` : wrapped
-    rest = rest.slice(closeIndex + 1).trim()
-  }
-
-  if (!narration || !rest) return null
-  return { narration, rest }
+  const speaker = activeSpeaker || '你'
+  return splitDialogueAndNarration(speaker, part)
 }
 
 function normalizeSpeaker(speaker) {
