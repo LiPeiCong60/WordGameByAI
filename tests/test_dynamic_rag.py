@@ -637,12 +637,12 @@ class DynamicRagTests(unittest.TestCase):
             refreshed_npc = db.exec(select(Character).where(Character.game_id == game.id, Character.name == "许晚")).one()
             self.assertEqual(refreshed_npc.mood, "稍微缓和")
             self.assertEqual(refreshed_npc.current_location, "校门口")
-            self.assertEqual(refreshed_npc.relationship_score, 65)
+            self.assertEqual(refreshed_npc.relationship_score, 85)
             self.assertEqual(refreshed_npc.affection_score, 56)
             self.assertEqual(refreshed_npc.trust_score, 0)
             self.assertEqual(refreshed_npc.tension_score, 34)
             self.assertTrue(patch["state_hint"])
-            self.assertEqual(patch["updated_characters"][0]["relationship_score"], 65)
+            self.assertEqual(patch["updated_characters"][0]["relationship_score"], 85)
 
     def test_stream_state_hint_tag_is_hidden_from_visible_story(self) -> None:
         hint_box = {}

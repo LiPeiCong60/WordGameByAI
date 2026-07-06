@@ -63,7 +63,7 @@ STATE_HINT_INSTRUCTIONS = (
     "updated_characters 每项必须指向已存在角色，使用 name 或 id；只允许字段 status, mood, relationship_to_player, "
     "relationship_score_delta, affection_score_delta, trust_score_delta, tension_score_delta, current_goal, current_location, memory_summary。"
     "如果剧情中角色移动、离开、抵达、打电话、发消息、等待过久、时间推进、气氛改变，必须同步更新相关角色的 current_location 和 mood；没有明确变化才保持不写。"
-    "数值 delta（或绝对值）每轮的变化幅度最大为 [-10, 10]，请参考关系数值更新指南根据剧情积极给出合理的数值增减，不要总是保持 0 不变。"
+    "数值 delta（或绝对值）每轮的变化幅度最大为 [-50, 50]，请参考关系数值更新指南根据剧情积极给出合理的数值增减，不要总是保持 0 不变。"
 )
 
 STATE_HINT_TAG_INSTRUCTIONS = (
@@ -81,10 +81,10 @@ RELATION_METRIC_RULES = (
     "这些数值可以互相矛盾，不要强行统一。例如可以出现 relationship_to_player=仇人、relationship_score=-80、affection_score=90、trust_score=15、tension_score=95。"
     "数值变化更新指南（关系必须是动态的，根据剧情变化合理更新，避免长期静止不变）："
     "1. 日常闲聊、普通打招呼、客套或无关痛痒的互动：数值微调（在 -2 到 +2 之间），或保持 0 不变。"
-    "2. 深入交流、谈及私密话题、流露明显情绪关心、轻微吃醋、小摩擦纠纷：数值中度调整（在 -10 到 -5 或 +5 到 +10 之间）。"
-    "3. 触及关键抉择、拯救生命、重大背叛、深情告白、剧烈争吵或揭开核心秘密：数值大幅调整（在 -30 到 -15 或 +15 到 +30 之间）。"
-    "4. 数值更新可以使用 delta（如 affection_score_delta: +15）或直接提供最新的绝对值（如 affection_score: 45）；"
-    "无论使用哪种，系统都会自动计算并把每回合的单项数值变化限制在 [-30, 30] 之间，请放心输出符合当前戏剧情感的数值。"
+    "2. 深入交流、谈及私密话题、流露明显情绪关心、轻微吃醋、小摩擦纠纷：数值中度调整（在 -20 到 -10 或 +10 到 +20 之间）。"
+    "3. 触及关键抉择、拯救生命、重大背叛、深情告白、剧烈争吵或揭开核心秘密：数值大幅调整（在 -50 到 -30 或 +30 到 +50 之间）。"
+    "4. 数值更新可以使用 delta（如 affection_score_delta: +25）或直接提供最新的绝对值（如 affection_score: 45）；"
+    "无论使用哪种，系统都会自动计算并把每回合的单项数值变化限制在 [-50, 50] 之间，请放心输出符合当前戏剧情感的数值。"
 )
 
 TIME_AND_CONTACT_RULES = (

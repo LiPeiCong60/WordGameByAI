@@ -138,12 +138,12 @@ def _clamp(value: int, minimum: int, maximum: int) -> int:
 
 
 def _bounded_delta(value) -> int:
-    return _clamp(as_int(value, 0), -30, 30)
+    return _clamp(as_int(value, 0), -50, 50)
 
 
 def _bounded_target(current: int, target, minimum: int, maximum: int) -> int:
     raw_target = _clamp(as_int(target, current), minimum, maximum)
-    return _clamp(current + _clamp(raw_target - current, -30, 30), minimum, maximum)
+    return _clamp(current + _clamp(raw_target - current, -50, 50), minimum, maximum)
 
 
 def _normalize_state_hint(raw_hint) -> dict:
