@@ -34,7 +34,7 @@ World Game by AI（仓库名 `WordGameByAI`）是一套完整开发版的 AI 互
 
 ### Android 安装包
 
-**[下载 World Game by AI Android v0.4.0+4 测试 APK](releases/WorldGameByAI-android-v0.4.0-build4.apk)**（约 59 MiB）
+**[直接下载 World Game by AI Android v0.4.0+4 测试 APK](https://github.com/LiPeiCong60/WordGameByAI/raw/refs/tags/v0.4.0/releases/WorldGameByAI-android-v0.4.0-build4.apk)**（约 59 MiB）
 
 ```text
 SHA-256  4bf0607353d0e758a076b39a6a58448365f12ba1cf818ad0dadb8fe5d83197ad
