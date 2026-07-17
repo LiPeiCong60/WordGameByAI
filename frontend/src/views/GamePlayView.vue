@@ -161,7 +161,7 @@ import NpcStatusPanel from '../components/NpcStatusPanel.vue'
 import SaveContextBar from '../components/SaveContextBar.vue'
 import StoryLog from '../components/StoryLog.vue'
 import { listCharacters } from '../api/characters'
-import { exportGame } from '../api/games'
+import { getGameStateSync, listGameTurns } from '../api/mobile'
 import { deleteTurnsFrom, regenerateTurnStream, runOpeningStream, runTurnStream } from '../api/turns'
 import { useGameStore } from '../stores/gameStore'
 import { useUiStore } from '../stores/uiStore'
@@ -190,7 +190,15 @@ const rightRailWidth = ref(Number(localStorage.getItem('playRightRailWidth')) ||
 
 const protagonist = computed(() => characters.value.find((item) => item.role_type === 'protagonist'))
 const npcs = computed(() => characters.value.filter((item) => item.role_type !== 'protagonist'))
-const checkerIssues = computed(() => latestTurn.value?.checker_result?.issues || [])
+const checkerIssues = computed(() => {
+  const checker = latestTurn.value?.checker_result || {}
+  const quality = checker.output_quality || {}
+  return [
+    ...(checker.issues || []),
+    ...(quality.format_issues || []).map((item) => ({ ...item, message: `格式：${item.message}` })),
+    ...(quality.content_issues || []).map((item) => ({ ...item, message: `内容：${item.message}` }))
+  ]
+})
 const canSubmitTurn = computed(() => Boolean(actionInput.value.trim() || dialogueInput.value.trim()))
 const canContinueDuringStateSync = computed(() => generationMode.value === 'fast' || generationMode.value === 'instant')
 const submitButtonText = computed(() => {
@@ -231,10 +239,13 @@ async function loadAll(options = {}) {
     const gameId = gameStore.currentGameId
     const starterResult = await ensureStarterCharacters(gameId, gameStore.currentGame)
     characters.value = starterResult.created ? await listCharacters(gameId) : starterResult.characters
-    const save = await exportGame(gameId)
-    const logs = (save.turn_logs || []).map(normalizeTurnLog)
+    const [turnPage, sync] = await Promise.all([
+      listGameTurns(gameId, { limit: 20 }),
+      getGameStateSync(gameId)
+    ])
+    const logs = (turnPage.items || []).map(normalizeTurnLog)
     turnLogs.value = logs.slice(-8)
-    stateSyncPending.value = isStateSyncPending(logs[logs.length - 1])
+    stateSyncPending.value = ['pending', 'running'].includes(sync?.job?.status) || isStateSyncPending(logs[logs.length - 1])
     if (!isStreaming.value) latestTurn.value = null
     shouldGenerateOpening = autoOpening && logs.length === 0 && !isStreaming.value
   })
@@ -352,6 +363,7 @@ function buildTurnPayload() {
   const action = actionInput.value.trim()
   const dialogue = dialogueInput.value.trim()
   return {
+    request_id: globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`,
     user_input: formatTurnInput(action, dialogue, autoCompleteBlank.value),
     action_input: action,
     dialogue_input: dialogue,
@@ -490,7 +502,6 @@ async function pollStateSync() {
     for (let index = 0; index < 80; index += 1) {
       await sleep(1500)
       if (!gameStore.currentGameId) return
-      await gameStore.loadCurrentGame()
       await loadAll({ autoOpening: false })
       if (!stateSyncPending.value) {
         queuedPayload = queuedTurnPayload.value

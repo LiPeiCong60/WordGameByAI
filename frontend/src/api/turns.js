@@ -1,12 +1,14 @@
-import { API_BASE_URL, apiDelete, apiPost, authHeaders } from './http'
+import { API_BASE_URL, apiDelete, apiPost, authorizedFetch } from './http'
 
 function buildTurnPayload(input, options = {}) {
   const base = typeof input === 'object' && input !== null ? input : { user_input: input }
   return { ...base, ...options }
 }
 
+const requestId = () => globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`
+
 export const runTurn = (gameId, input, options = {}) => apiPost(`/games/${gameId}/turn`, buildTurnPayload(input, options))
-export const runOpening = (gameId) => apiPost(`/games/${gameId}/opening`)
+export const runOpening = (gameId) => apiPost(`/games/${gameId}/opening`, undefined, { headers: { 'X-Request-ID': requestId() } })
 
 function turnActionQuery(options = {}) {
   const params = new URLSearchParams()
@@ -16,8 +18,8 @@ function turnActionQuery(options = {}) {
   return query ? `?${query}` : ''
 }
 
-export const deleteTurnsFrom = (turnId, options = {}) => apiDelete(`/turns/${turnId}/from-here${turnActionQuery(options)}`)
-export const regenerateTurn = (turnId, options = {}) => apiPost(`/turns/${turnId}/regenerate${turnActionQuery(options)}`)
+export const deleteTurnsFrom = (turnId, options = {}) => apiDelete(`/turns/${turnId}/from-here${turnActionQuery(options)}`, { headers: { 'X-Request-ID': requestId() } })
+export const regenerateTurn = (turnId, options = {}) => apiPost(`/turns/${turnId}/regenerate${turnActionQuery(options)}`, undefined, { headers: { 'X-Request-ID': options.request_id || requestId() } })
 
 async function consumeNdjsonStream(response, onEvent) {
   if (!response.ok) {
@@ -45,26 +47,27 @@ async function consumeNdjsonStream(response, onEvent) {
 }
 
 export async function runTurnStream(gameId, input, onEvent, options = {}) {
-  const response = await fetch(`${API_BASE_URL}/games/${gameId}/turn/stream`, {
+  const response = await authorizedFetch(`${API_BASE_URL}/games/${gameId}/turn/stream`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(buildTurnPayload(input, options))
   })
   return consumeNdjsonStream(response, onEvent)
 }
 
 export async function runOpeningStream(gameId, onEvent) {
-  const response = await fetch(`${API_BASE_URL}/games/${gameId}/opening/stream`, {
+  const openingRequestId = requestId()
+  const response = await authorizedFetch(`${API_BASE_URL}/games/${gameId}/opening/stream`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...authHeaders() }
+    headers: { 'Content-Type': 'application/json', 'X-Request-ID': openingRequestId }
   })
   return consumeNdjsonStream(response, onEvent)
 }
 
 export async function regenerateTurnStream(turnId, onEvent, options = {}) {
-  const response = await fetch(`${API_BASE_URL}/turns/${turnId}/regenerate/stream${turnActionQuery(options)}`, {
+  const response = await authorizedFetch(`${API_BASE_URL}/turns/${turnId}/regenerate/stream${turnActionQuery(options)}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...authHeaders() }
+    headers: { 'Content-Type': 'application/json', 'X-Request-ID': options.request_id || requestId() }
   })
   return consumeNdjsonStream(response, onEvent)
 }

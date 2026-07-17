@@ -1,12 +1,15 @@
 <template>
   <section class="save-context">
-    <div>
-      <span class="step-badge">当前存档</span>
-      <h2>{{ gameStore.currentGame?.title || '未选择存档' }}</h2>
-      <p>
-        {{ gameStore.currentGame?.genre || '请选择一个存档' }}
-        <span v-if="gameStore.currentGame?.world_type"> · {{ gameStore.currentGame.world_type }}</span>
-      </p>
+    <div class="save-context-identity">
+      <span class="save-context-icon"><BookOpen :size="21" /></span>
+      <div>
+        <span class="step-badge">当前存档</span>
+        <h2>{{ gameStore.currentGame?.title || '未选择存档' }}</h2>
+        <p>
+          {{ gameStore.currentGame?.genre || '请选择一个存档' }}
+          <span v-if="gameStore.currentGame?.world_type"> · {{ gameStore.currentGame.world_type }}</span>
+        </p>
+      </div>
     </div>
     <div class="save-context-actions">
       <select v-model.number="selectedGameId" @change="switchGame">
@@ -23,6 +26,7 @@
 <script setup>
 import { onMounted, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
+import { BookOpen } from 'lucide-vue-next'
 import { listGames } from '../api/games'
 import { useGameStore } from '../stores/gameStore'
 import { useUiStore } from '../stores/uiStore'

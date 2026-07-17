@@ -63,6 +63,7 @@
           <div class="starter-character-grid">
             <article v-for="(character, index) in starterCharacters" :key="character.local_id" class="starter-character-card">
               <header>
+                <CharacterAvatar :character="character" :avatar-url="character.avatar_url" :size="58" shape="rounded" show-auto-badge />
                 <label class="field"><span>姓名</span><input v-model="character.name" @input="writeCharactersToJson" /></label>
                 <label class="field">
                   <span>类型</span>
@@ -80,7 +81,7 @@
                 <label class="field"><span>性别</span><input v-model="character.gender" @input="writeCharactersToJson" /></label>
                 <label class="field"><span>年龄</span><input v-model="character.age" @input="writeCharactersToJson" /></label>
                 <label class="field"><span>身份</span><input v-model="character.race_or_identity" @input="writeCharactersToJson" /></label>
-                <label class="field"><span>头像URL</span><input v-model="character.avatar_url" @input="writeCharactersToJson" /></label>
+                <label class="field"><span>专属头像 URL（可选）</span><input v-model="character.avatar_url" placeholder="留空则智能匹配" @input="writeCharactersToJson" /></label>
                 <label class="field"><span>位置</span><input v-model="character.current_location" @input="writeCharactersToJson" /></label>
                 <label class="field"><span>状态</span><input v-model="character.status" @input="writeCharactersToJson" /></label>
                 <label class="field"><span>心情</span><input v-model="character.mood" @input="writeCharactersToJson" /></label>
@@ -127,6 +128,7 @@
 <script setup>
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { Pencil, Plus, RefreshCw, RotateCcw, Save, Trash2, UserPlus } from 'lucide-vue-next'
+import CharacterAvatar from '../components/CharacterAvatar.vue'
 import JsonEditor from '../components/JsonEditor.vue'
 import SectionAgentPanel from '../components/SectionAgentPanel.vue'
 import { createTemplate, deleteTemplate, listTemplates, updateTemplate } from '../api/templates'

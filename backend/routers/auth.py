@@ -1,12 +1,21 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Header
 from sqlmodel import Session
 
-from auth_service import create_captcha, get_current_user, login_user, public_user, register_user
+from auth_service import (
+    bearer_token_value,
+    create_captcha,
+    get_current_user,
+    login_user,
+    public_user,
+    refresh_user_session,
+    register_user,
+    revoke_user_session,
+)
 from database import get_session
 from models import User
-from schemas import LoginRequest, RegisterRequest
+from schemas import LoginRequest, LogoutRequest, RefreshTokenRequest, RegisterRequest
 
 router = APIRouter()
 
@@ -25,6 +34,7 @@ def register(payload: RegisterRequest, db: Session = Depends(get_session)):
         payload.email,
         payload.captcha_id,
         payload.captcha_answer,
+        payload.bootstrap_token,
     )
 
 
@@ -36,3 +46,19 @@ def login(payload: LoginRequest, db: Session = Depends(get_session)):
 @router.get("/auth/me")
 def me(user: User = Depends(get_current_user)):
     return public_user(user)
+
+
+@router.post("/auth/refresh")
+def refresh(payload: RefreshTokenRequest, db: Session = Depends(get_session)):
+    return refresh_user_session(db, payload.refresh_token)
+
+
+@router.post("/auth/logout")
+def logout(
+    payload: LogoutRequest | None = None,
+    authorization: str | None = Header(default=None),
+    db: Session = Depends(get_session),
+    _user: User = Depends(get_current_user),
+):
+    revoke_user_session(db, bearer_token_value(authorization), payload.refresh_token if payload else "")
+    return {"ok": True}

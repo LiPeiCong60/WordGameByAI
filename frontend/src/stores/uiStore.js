@@ -3,6 +3,7 @@ import { defineStore } from 'pinia'
 export const useUiStore = defineStore('ui', {
   state: () => ({
     loading: false,
+    pendingCount: 0,
     error: ''
   }),
   actions: {
@@ -13,6 +14,7 @@ export const useUiStore = defineStore('ui', {
       this.error = ''
     },
     async run(task) {
+      this.pendingCount += 1
       this.loading = true
       this.error = ''
       try {
@@ -21,7 +23,8 @@ export const useUiStore = defineStore('ui', {
         this.setError(error)
         throw error
       } finally {
-        this.loading = false
+        this.pendingCount = Math.max(0, this.pendingCount - 1)
+        this.loading = this.pendingCount > 0
       }
     }
   }

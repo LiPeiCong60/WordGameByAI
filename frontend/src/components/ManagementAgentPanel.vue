@@ -1,7 +1,7 @@
 <template>
   <section class="panel management-panel">
     <header class="panel-header">
-      <h2>存档管理智能体</h2>
+      <div class="agent-heading"><span class="agent-mark"><Bot :size="20" /></span><div><h2>存档管理智能体</h2><small>World Game AI 助手</small></div></div>
       <button type="button" class="icon-button" title="新建会话" @click="$emit('create-session')">
         <Plus :size="17" />
       </button>
@@ -49,7 +49,7 @@
       <article v-if="pending" class="chat-message chat-message--assistant">
         <div class="chat-bubble">
           <header class="chat-meta"><span>智能体</span></header>
-          <p>正在整理回复...</p>
+          <p class="typing-indicator"><i></i><i></i><i></i><span>正在整理回复</span></p>
         </div>
       </article>
     </div>
@@ -64,7 +64,7 @@
 </template>
 
 <script setup>
-import { Check, Plus, Send, X } from 'lucide-vue-next'
+import { Bot, Check, Plus, Send, X } from 'lucide-vue-next'
 
 defineProps({
   sessions: { type: Array, default: () => [] },

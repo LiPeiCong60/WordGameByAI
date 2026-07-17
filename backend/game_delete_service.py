@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi import HTTPException
 from sqlmodel import Session, SQLModel, select
 
@@ -12,11 +14,13 @@ from models import (
     StoryWorld,
     TurnLog,
     TurnSnapshot,
+    TurnStateJob,
     WorldLore,
 )
 
 
 RELATED_GAME_MODELS: tuple[type[SQLModel], ...] = (
+    TurnStateJob,
     TurnSnapshot,
     TurnLog,
     RagMemory,
@@ -31,10 +35,15 @@ RELATED_GAME_MODELS: tuple[type[SQLModel], ...] = (
 def delete_game_related_records(session: Session, game_id: int) -> dict[str, int]:
     """Delete records owned by one save without deleting global templates."""
     deleted: dict[str, int] = {}
+    upload_dir = Path(__file__).resolve().parent / "uploads" / "characters"
     for model in RELATED_GAME_MODELS:
         records = list(session.exec(select(model).where(model.game_id == game_id)).all())
         deleted[model.__name__] = len(records)
         for record in records:
+            if model is Character and record.avatar_url.startswith("/uploads/characters/"):
+                candidate = (upload_dir / record.avatar_url.removeprefix("/uploads/characters/")).resolve()
+                if candidate.parent == upload_dir.resolve():
+                    candidate.unlink(missing_ok=True)
             session.delete(record)
     session.commit()
     return deleted

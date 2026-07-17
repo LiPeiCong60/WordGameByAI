@@ -5,11 +5,12 @@ import os
 from typing import Iterator
 
 from dotenv import load_dotenv
-from sqlalchemy import inspect, text
+from sqlalchemy import delete, inspect, text
 from sqlmodel import Session, SQLModel, create_engine, select
 
-from models import Character, Game, StoryWorld, User, WorldTemplate
+from models import AuthToken, CaptchaChallenge, Character, Game, MessageRateBucket, StoryWorld, User, WorldTemplate
 from numeric_utils import as_int
+from time_utils import utc_now
 
 load_dotenv()
 
@@ -395,6 +396,21 @@ def migrate_db_schema() -> None:
             for name, definition in user_additions.items():
                 if name not in user_columns:
                     connection.execute(text(f"ALTER TABLE user ADD COLUMN {name} {definition}"))
+    if "authtoken" in table_names:
+        token_columns = {column["name"] for column in inspector.get_columns("authtoken")}
+        token_additions = {
+            "kind": "VARCHAR(20) NOT NULL DEFAULT 'access'",
+            "last_used_at": "DATETIME NULL",
+        }
+        with engine.begin() as connection:
+            for name, definition in token_additions.items():
+                if name not in token_columns:
+                    connection.execute(text(f"ALTER TABLE authtoken ADD COLUMN {name} {definition}"))
+    if "turnlog" in table_names:
+        turn_columns = {column["name"] for column in inspector.get_columns("turnlog")}
+        if "client_request_id" not in turn_columns:
+            with engine.begin() as connection:
+                connection.execute(text("ALTER TABLE turnlog ADD COLUMN client_request_id VARCHAR(100) NULL"))
     if "game" in table_names:
         game_columns = {column["name"] for column in inspector.get_columns("game")}
         if "owner_user_id" not in game_columns:
@@ -432,6 +448,31 @@ def migrate_db_schema() -> None:
                 with engine.begin() as connection:
                     connection.execute(text("ALTER TABLE turnsnapshot MODIFY COLUMN snapshot_json MEDIUMTEXT"))
 
+    _ensure_unique_index("user", "uq_user_username", ["username"])
+    _ensure_unique_index("authtoken", "uq_auth_token_hash", ["token_hash"])
+    _ensure_unique_index("messageusage", "uq_message_usage_user_date", ["user_id", "usage_date"])
+    _ensure_unique_index("turnlog", "uq_turn_log_game_number", ["game_id", "turn_number"])
+    _ensure_unique_index("turnlog", "uq_turn_log_game_request", ["game_id", "client_request_id"])
+
+
+def _ensure_unique_index(table: str, name: str, columns: list[str]) -> None:
+    inspector = inspect(engine)
+    if table not in inspector.get_table_names():
+        return
+    existing_names = {item.get("name") for item in inspector.get_indexes(table)}
+    existing_names.update(item.get("name") for item in inspector.get_unique_constraints(table))
+    if name in existing_names:
+        return
+    quote = engine.dialect.identifier_preparer.quote
+    column_sql = ", ".join(quote(column) for column in columns)
+    try:
+        with engine.begin() as connection:
+            connection.execute(text(f"CREATE UNIQUE INDEX {quote(name)} ON {quote(table)} ({column_sql})"))
+    except Exception as exc:
+        raise RuntimeError(
+            f"无法创建唯一索引 {name}；请先清理 {table} 表中 {', '.join(columns)} 的重复数据。"
+        ) from exc
+
 
 def init_db() -> None:
     SQLModel.metadata.create_all(engine)
@@ -440,3 +481,12 @@ def init_db() -> None:
         seed_default_templates(session)
         normalize_template_character_fields(session)
         normalize_numeric_fields(session)
+        cleanup_expired_runtime_records(session)
+
+
+def cleanup_expired_runtime_records(session: Session) -> None:
+    now = utc_now()
+    session.exec(delete(CaptchaChallenge).where(CaptchaChallenge.expires_at < now))
+    session.exec(delete(AuthToken).where(AuthToken.expires_at < now))
+    session.exec(delete(MessageRateBucket).where(MessageRateBucket.expires_at < now))
+    session.commit()

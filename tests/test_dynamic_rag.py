@@ -4,7 +4,8 @@ import sys
 import tempfile
 import unittest
 import asyncio
-from datetime import datetime, timedelta
+from unittest.mock import patch
+from datetime import timedelta
 from pathlib import Path
 
 from sqlalchemy.pool import StaticPool
@@ -38,6 +39,7 @@ from schemas import ManagementChatRequest, ManagementSessionCreate, RagSearchReq
 from starter_character_service import CHARACTER_FIELDS, ensure_starter_characters
 from turn_history_service import delete_turns_from
 from message_quota_service import require_message_quota
+from time_utils import utc_now
 
 
 def make_session() -> Session:
@@ -93,7 +95,7 @@ def seed_game(db: Session) -> Game:
     return game
 
 
-def test_user() -> User:
+def make_test_user() -> User:
     return User(id=1, username="tester", is_admin=True)
 
 
@@ -113,12 +115,21 @@ class DynamicRagTests(unittest.TestCase):
             captcha = CaptchaChallenge(
                 id="captcha-test",
                 answer_hash=_sha256("12"),
-                expires_at=datetime.utcnow() + timedelta(minutes=5),
+                expires_at=utc_now() + timedelta(minutes=5),
             )
             db.add(captcha)
             db.commit()
 
-            session = register_user(db, "admin_test", "password123", "admin@example.com", "captcha-test", "12")
+            with patch.dict("os.environ", {"ADMIN_BOOTSTRAP_TOKEN": "fixture-bootstrap"}):
+                session = register_user(
+                    db,
+                    "admin_test",
+                    "password123",
+                    "admin@example.com",
+                    "captcha-test",
+                    "12",
+                    "fixture-bootstrap",
+                )
             self.assertTrue(session["user"]["is_admin"])
             self.assertTrue(session["token"])
 
@@ -130,12 +141,12 @@ class DynamicRagTests(unittest.TestCase):
             register_captcha = CaptchaChallenge(
                 id="captcha-register",
                 answer_hash=_sha256("12"),
-                expires_at=datetime.utcnow() + timedelta(minutes=5),
+                expires_at=utc_now() + timedelta(minutes=5),
             )
             login_captcha = CaptchaChallenge(
                 id="captcha-login",
                 answer_hash=_sha256("9"),
-                expires_at=datetime.utcnow() + timedelta(minutes=5),
+                expires_at=utc_now() + timedelta(minutes=5),
             )
             db.add(register_captcha)
             db.add(login_captcha)
@@ -148,7 +159,7 @@ class DynamicRagTests(unittest.TestCase):
 
     def test_template_management_routes_allow_global_admin_session(self) -> None:
         with make_session() as db:
-            admin = test_user()
+            admin = make_test_user()
             created = management_router.create_session(0, ManagementSessionCreate(title="模板测试"), db, admin)
             self.assertEqual(created.game_id, 0)
             self.assertEqual(created.owner_user_id, admin.id)
@@ -183,7 +194,7 @@ class DynamicRagTests(unittest.TestCase):
 
     def test_templates_are_public_for_admin_and_private_for_normal_users(self) -> None:
         with make_session() as db:
-            admin = test_user()
+            admin = make_test_user()
             normal = User(id=2, username="normal", is_admin=False)
             other = User(id=3, username="other", is_admin=False)
 
@@ -766,7 +777,7 @@ class DynamicRagTests(unittest.TestCase):
     def test_rag_router_rebuild_and_search(self) -> None:
         with make_session() as db:
             game = seed_game(db)
-            user = test_user()
+            user = make_test_user()
             rebuild_result = rebuild_game_rag(game.id, db, user)
             self.assertTrue(rebuild_result["ok"])
 
@@ -889,7 +900,7 @@ class DynamicRagTests(unittest.TestCase):
             db.refresh(proposal)
 
             with self.assertRaises(Exception) as raised:
-                apply_management_proposal(proposal.id, db, test_user())
+                apply_management_proposal(proposal.id, db, make_test_user())
 
             self.assertEqual(getattr(raised.exception, "status_code", None), 403)
             refreshed = db.get(Character, other_character.id)
@@ -934,7 +945,7 @@ class DynamicRagTests(unittest.TestCase):
             db.refresh(other_world)
 
             with self.assertRaises(Exception) as raised:
-                games_router.update_game(game.id, games_router.GameUpdate(current_story_world_id=other_world.id), db, test_user())
+                games_router.update_game(game.id, games_router.GameUpdate(current_story_world_id=other_world.id), db, make_test_user())
 
             self.assertEqual(getattr(raised.exception, "status_code", None), 400)
             context = game_engine.load_game_context(game.id, db)
@@ -1002,6 +1013,35 @@ class DynamicRagTests(unittest.TestCase):
             with self.assertRaises(Exception) as size_error:
                 asyncio.run(characters_router.upload_avatar(character.id, FakeUploadFile(oversized, "image/png"), db, user))
             self.assertEqual(getattr(size_error.exception, "status_code", None), 413)
+
+    def test_delete_avatar_clears_database_and_local_file(self) -> None:
+        with make_session() as db, tempfile.TemporaryDirectory() as upload_dir:
+            game = Game(title="恢复智能头像", owner_user_id=1)
+            db.add(game)
+            db.commit()
+            db.refresh(game)
+            character = Character(
+                game_id=game.id,
+                name="许晚",
+                avatar_url="/uploads/characters/avatar.png",
+            )
+            db.add(character)
+            db.commit()
+            db.refresh(character)
+            avatar_file = Path(upload_dir) / "avatar.png"
+            avatar_file.write_bytes(b"test")
+            original_upload_dir = characters_router.UPLOAD_DIR
+            characters_router.UPLOAD_DIR = Path(upload_dir)
+            try:
+                result = characters_router.delete_avatar(
+                    character.id, db, User(id=1, username="owner")
+                )
+            finally:
+                characters_router.UPLOAD_DIR = original_upload_dir
+
+            self.assertEqual(result["avatar_url"], "")
+            self.assertEqual(db.get(Character, character.id).avatar_url, "")
+            self.assertFalse(avatar_file.exists())
 
     def test_llm_errors_are_sanitized_and_stream_uses_timeout(self) -> None:
         original_config = llm_client._llm_config

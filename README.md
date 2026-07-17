@@ -1,358 +1,411 @@
-# WordGameByAI
+<p align="center">
+  <img src="frontend/public/assets/brand/app_icon.webp" width="112" alt="World Game by AI 图标">
+</p>
 
-一个基于 FastAPI、Vue3 和 LangChain ChatOpenAI 的 AI 文字 RPG 应用框架，用结构化数据和多 Agent 叙事流水线管理长篇互动剧情。
+<h1 align="center">World Game by AI</h1>
 
-[项目说明书](docs/项目说明书.md) | [项目现状](docs/PROJECT_STATUS.md) | [公网部署准备清单](docs/公网部署准备清单.md) | [公网部署与迁移手册](docs/公网部署与迁移手册.md) | [安全说明](SECURITY.md)
+<p align="center">
+  <strong>让 AI 不只会续写，也能记住世界、理解角色，并安全地推动一部长篇互动故事。</strong>
+</p>
 
-## 项目简介
+<p align="center">
+  <img alt="Development" src="https://img.shields.io/badge/status-development-2f7df4">
+  <img alt="Android 0.4.0+4" src="https://img.shields.io/badge/Android-0.4.0%2B4-34a853">
+  <img alt="Tests 66" src="https://img.shields.io/badge/tests-66%20declared-20b486">
+  <img alt="License" src="https://img.shields.io/badge/license-all%20rights%20reserved-lightgrey">
+</p>
 
-WordGameByAI 面向 AI 文字游戏、互动叙事 Demo 和 AI Agent 应用原型开发场景。项目尝试解决普通 LLM 聊天式文字游戏中常见的几个问题：世界观容易漂移、角色状态难以追踪、人物关系变化不稳定、AI 生成的修改缺少安全边界。
+<p align="center">
+  <a href="#快速开始">快速开始</a> ·
+  <a href="#功能全景">功能全景</a> ·
+  <a href="#android-客户端">Android</a> ·
+  <a href="#部署到公网">部署</a> ·
+  <a href="docs/PROJECT_STATUS.md">项目状态</a> ·
+  <a href="SECURITY.md">安全说明</a>
+</p>
 
-项目把“剧情生成”拆成一套可管理的应用流程：前端提供存档、模板、角色、世界观、世界/副本和剧情推进界面；后端使用 FastAPI 提供 REST API 和流式剧情接口；数据库使用 SQLModel 保存游戏状态，开发可用 SQLite，公网生产建议 MySQL；LLM 调用层基于 `langchain-openai` 的 `ChatOpenAI`，由多个职责明确的 Agent 模块完成主角行动理解、NPC 反应推演、剧情生成、状态补丁提取和一致性检查。
+---
 
-这不是一个单纯的聊天页面，而是一个围绕“AI 叙事 + 状态管理 + 数据安全写入”设计的 AI 应用框架。
+World Game by AI（仓库名 `WordGameByAI`）是一套完整开发版的 AI 互动文字 RPG：Vue 网页端与 Flutter Android 客户端共享 FastAPI 后端，通过结构化世界观、角色状态、动态记忆 RAG、多 Agent 叙事流水线和受控状态写入，持续推进可保存、可回溯、可管理的长篇故事。
 
-## 当前状态
+它不是把聊天框直接接到大模型，而是把一次剧情生成拆成“理解玩家意图 → 推演角色反应 → 生成叙事 → 提取状态变化 → 一致性检查 → 安全落库”的应用流程。模型输出不理想时，系统还会区分格式/解析故障与 Prompt、上下文或模型内容质量问题，便于针对性调试。
 
-截至 2026-07-10，项目已形成可本地运行的全栈原型：存档、账号权限、模板、世界观、角色、剧情推进、动态记忆 RAG、管理 Agent 和导入导出均有对应前后端实现。开发环境默认使用 SQLite，接入 OpenAI-compatible 模型后可运行完整叙事流程。
+> 当前项目适合个人部署、原型验证与小规模使用。正式商用、高并发或应用商店发布前，请先完成本文“生产边界”中的事项。
 
-当前工程仍以单机/小规模部署为主，自动化测试集中在后端叙事与 RAG 核心逻辑，尚未配置前端 E2E 与 CI。详细完成度、验证范围和下一步计划见 [项目现状](docs/PROJECT_STATUS.md)。
+### Android 安装包
+
+**[下载 World Game by AI Android v0.4.0+4 测试 APK](releases/WorldGameByAI-android-v0.4.0-build4.apk)**（约 59 MiB）
+
+```text
+SHA-256  4bf0607353d0e758a076b39a6a58448365f12ba1cf818ad0dadb8fe5d83197ad
+```
+
+该 APK 已在 Android 模拟器完成登录、模板建档、AI 开场、剧情对话和角色头像验证。它仍使用测试签名并连接当前测试服务，仅用于安装体验；正式分发前必须改用 HTTPS、唯一包名和私有 release keystore。校验清单见 [`releases/SHA256SUMS.txt`](releases/SHA256SUMS.txt)。
+
+## 界面预览
+
+### Web
+
+<p align="center">
+  <img src="docs/images/web-login.png" width="92%" alt="World Game by AI 网页登录页">
+</p>
+
+### Android
+
+<table>
+  <tr>
+    <td width="34%" align="center"><img src="docs/images/android-gameplay.png" alt="Android 剧情对话页"></td>
+    <td width="34%" align="center"><img src="docs/images/android-characters.png" alt="Android 角色管理页"></td>
+    <td width="34%" align="center"><img src="docs/images/android-avatar-library.png" alt="Android 智能头像库"></td>
+  </tr>
+  <tr>
+    <td align="center">对话、动作、心理分层呈现</td>
+    <td align="center">角色卡与标签化状态</td>
+    <td align="center">AI 漫剧头像自动匹配</td>
+  </tr>
+</table>
 
 ## 项目亮点
 
-- **LangChain 接入大模型**：通过 `langchain-openai` 的 `ChatOpenAI` 封装 OpenAI-compatible Chat Completions API，支持普通调用和流式输出。
-- **多 Agent 角色分工流水线**：将主角行动、NPC 反应、旁白生成、状态补丁和一致性检查拆分为独立 Agent 模块，由 `game_engine.py` 统一编排。
-- **结构化 Prompt 与 JSON 输出**：Agent Prompt 明确约束输出字段，使用 `response_format={"type": "json_object"}` 获取结构化结果，便于后端解析和落库。
-- **动态记忆 RAG**：将世界观、角色记忆和每轮剧情摘要写入 `RagMemory`，每轮生成前按玩家输入检索相关长期记忆并注入 Agent 上下文。
-- **行动与台词分离输入**：剧情推进时可分别填写“玩家希望的行动/背景/响应”和“主角实际说出口的话”，并支持空白项由系统结合上下文补全。
-- **快速 / 精细双模式生成**：快速模式跳过前置主角/NPC 独立 LLM 推演，更快开始流式输出；精细模式完整执行多 Agent 推演，适合复杂剧情。
-- **完整的状态建模**：使用 SQLModel 建模 Game、StoryWorld、WorldLore、Character、TurnLog、TurnSnapshot 等核心实体。
-- **FastAPI + Vue 前后端联调**：后端提供 REST/NDJSON 流式接口，前端使用 Axios 和 fetch stream 消费接口，支持剧情推进、管理台和数据编辑。
-- **AI 写入安全控制**：ManagementAgent 只生成修改方案，用户确认后才执行；后端通过 action 白名单和字段白名单限制 AI 对数据的影响范围。
+- **完整的 Web + Android + API**：网页与 App 都能完成注册登录、建档、剧情、角色、世界、设定、管理助手和管理员功能。
+- **八类 Agent 分工**：开场、主角理解、NPC 反应、旁白、状态补丁、检查、设定整理和管理提案各司其职。
+- **可控的长篇状态**：世界、角色、关系、回合与快照均结构化存储，避免只依赖聊天上下文。
+- **轻量动态记忆 RAG**：索引世界观、角色记忆与回合摘要，不依赖额外 Embedding 服务即可检索长期信息。
+- **三档生成模式**：极速、快速、精细在延迟、状态整理与推演深度之间提供清晰取舍。
+- **真正的流式剧情**：后端返回 NDJSON，Web 与 Android 均可边生成边展示。
+- **对白结构化展示**：把旁白、动作、心理和角色台词解析为不同 UI，而不是把模型全文塞进一个文本框。
+- **AI 写入有边界**：管理 Agent 先给出提案，只有用户确认后才执行；服务端再用 action 与字段白名单校验。
+- **移动端可靠网络层**：安全令牌存储、401 自动刷新、请求幂等、分页与状态同步均已实现。
+- **默认头像智能匹配**：没有上传图片时，根据姓名、性别、年龄、身份、外貌、性格和角色类型稳定匹配头像。
 
-## 功能模块
+## 功能全景
 
-| 模块 | 功能说明 |
-| --- | --- |
-| 存档管理 | 创建、编辑、删除、导入、导出游戏存档，维护题材、世界类型、文风规则和当前状态。 |
-| 账号权限 | 支持注册、登录、验证码校验和 Bearer Token 鉴权；第一个注册用户自动成为管理员。 |
-| 管理后台 | 管理员可查看用户、存档和基础统计，普通用户只能访问自己的存档。 |
-| 模板系统 | 内置都市恋爱、玄幻修真、丧尸末日、快穿任务、科幻远征和自定义空白模板；公共模板所有用户可见，普通用户可创建仅自己可见的私人模板。 |
-| 世界/副本管理 | 维护 StoryWorld，支持任务目标、完成条件、失败条件、剧情偏移度和当前世界切换。 |
-| 世界观管理 | 管理 WorldLore 条目，并通过 LoreAgent 将自然语言设定整理为结构化世界观数据。 |
-| 角色系统 | 管理主角、NPC、反派、阵营代表等角色卡，支持头像上传和 `agent_enabled` 子 Agent 开关。 |
-| 动态记忆 RAG | 使用本地哈希向量检索世界观、角色长期记忆和剧情摘要，支持重建、检索和随剧情推进更新。 |
-| 剧情推进 | 支持开场生成、行动/台词拆分输入、空白补全、快速/精细生成、流式剧情输出、回合记录、删除后续回合和重新生成。 |
-| 管理 Agent | 通过自然语言生成存档修改方案，用户确认后执行白名单动作。 |
-| 导入导出 | 导出完整存档 JSON，导入后重建游戏、世界、设定、角色和回合记录。 |
+| 能力 | Web | Android | API |
+| --- | :---: | :---: | :---: |
+| 验证码注册、登录、刷新令牌、注销 | ✅ | ✅ | ✅ |
+| 存档创建、编辑、删除 | ✅ | ✅ | ✅ |
+| 存档 JSON 导入 / 导出 | ✅ | ✅ | ✅ |
+| 公共与私人世界模板 | ✅ | ✅ | ✅ |
+| 世界 / 副本 CRUD 与当前世界切换 | ✅ | ✅ | ✅ |
+| 世界观 CRUD 与 LoreAgent 整理 | ✅ | ✅ | ✅ |
+| 完整角色卡 CRUD | ✅ | ✅ | ✅ |
+| 上传、删除与恢复智能头像 | ✅ | ✅ | ✅ |
+| 12 类默认头像与标签匹配 | ✅ | ✅ | 客户端匹配 |
+| AI 开场、回合推进、NDJSON 流式输出 | ✅ | ✅ | ✅ |
+| 行动与对白分离输入、空白智能补全 | ✅ | ✅ | ✅ |
+| 极速 / 快速 / 精细模式 | ✅ | ✅ | ✅ |
+| 指定回合重新生成与重新分支 | ✅ | ✅ | ✅ |
+| 动态记忆浏览、检索与重建 | — | ✅ | ✅ |
+| 管理 Agent 提案、确认与拒绝 | ✅ | ✅ | ✅ |
+| 用户、会员、额度、模型池与等级管理 | ✅ | ✅ | ✅ |
+| Token 用量统计 | ✅ | ✅ | ✅ |
+
+网页剧情工作台另有旁白/聊天框模式、当前时间地点、主角与 NPC 状态侧栏、CheckerAgent 警告、桌面栏宽度调节及响应式导航。Android 客户端提供存档、剧情、角色、世界、设定、智能助手六个工作区，并包含管理员用户、模型池、模型等级与用量页面。
+
+## 三种剧情生成模式
+
+| 模式 | 适合场景 | 实际流程 |
+| --- | --- | --- |
+| **极速** | 试探方向、低延迟对话 | 跳过前置独立推演和完整状态整理，只应用 Hint 软状态。 |
+| **快速** | 日常推进、兼顾速度 | 跳过前置主角/NPC LLM 推演，优先返回剧情，再在后台整理完整状态。 |
+| **精细** | 关键剧情、复杂关系 | 完整执行主角、NPC、旁白、补丁与一致性检查流程。 |
+
+## 多 Agent 与数据流
+
+```mermaid
+flowchart LR
+    U[玩家行动与对白] --> P[ProtagonistAgent]
+    P --> N[NPCReactionAgent]
+    M[(动态记忆 RAG)] --> P
+    M --> N
+    P --> R[NarratorAgent]
+    N --> R
+    R --> S[NDJSON 流式剧情]
+    S --> W[Web / Android]
+    R --> H[PatchAgent]
+    H --> C[CheckerAgent]
+    C -->|通过| D[(SQLModel 数据库)]
+    C -->|警告/拒绝| Q[质量诊断]
+    D --> M
+```
+
+Agent 职责：
+
+1. `OpeningAgent`：生成第一幕。
+2. `ProtagonistAgent`：理解并结构化主角的行动与对白。
+3. `NPCReactionAgent`：选择相关 NPC 并推演反应。
+4. `NarratorAgent`：生成玩家可见剧情，支持流式输出。
+5. `PatchAgent`：提取角色、世界与当前状态变化。
+6. `CheckerAgent`：检查补丁一致性与安全性。
+7. `LoreAgent`：把自然语言设定整理为结构化世界观。
+8. `ManagementAgent`：生成管理修改提案，确认后才执行。
+
+结构化 Agent 使用 JSON Object 输出和较低温度。完整模式下，Checker 未通过就不会应用完整状态补丁；内部 `STATE_HINT` 也会从玩家可见剧情中移除。
+
+## 智能头像系统
+
+项目内置 12 张明亮的 AI 漫剧风头像，覆盖儿童、少年、青年、中年和老年角色：
+
+- 儿童：活泼男孩、好奇女孩
+- 少年：沉静少年、灵动少女
+- 青年：俊朗青年、优雅青年、硬朗青年、亲和青年
+- 中年：沉稳男性、干练女性
+- 老年：睿智男性、慈祥女性
+
+匹配优先级为：用户上传图片 → 可访问的网络图片 → 标签自动匹配 → 稳定哈希兜底。同一角色在信息不变时会得到同一默认头像；删除上传图片后可恢复智能匹配。头像是 Web 与 App 的内置资源，并非服务器实时生成。
 
 ## 技术栈
 
-| 类别 | 技术 |
+| 层级 | 技术 |
 | --- | --- |
-| 前端 | Vue 3、Vite、Vue Router、Pinia、Axios、lucide-vue-next、原生 CSS |
-| 后端 | Python、FastAPI、SQLModel、Pydantic、Uvicorn |
-| AI / 大模型 | LangChain、langchain-openai、ChatOpenAI、OpenAI-compatible API、结构化 JSON 输出 |
-| 数据库 | SQLModel、SQLite、MySQL；本地可用 SQLite，公网生产建议 MySQL |
-| 工程工具 | npm、Python venv、`.env` 配置、`.gitignore` 隐私排除、FastAPI Swagger 文档 |
-| 运行环境 | 本地开发环境，后端默认 `localhost:8000`，前端默认 `localhost:5173` |
+| Web | Vue 3.5、Vite 6、Vue Router 4、Pinia 2、Axios、Lucide、原生 CSS |
+| Android | Flutter、Dart ≥ 3.4、Material 3、Dio、flutter_secure_storage、file_picker、UUID |
+| API | Python、FastAPI、SQLModel、Pydantic、Uvicorn |
+| AI | LangChain、langchain-openai、ChatOpenAI、OpenAI-compatible API |
+| 数据 | SQLite 或 MySQL、项目内稳定哈希向量 RAG |
+| Android 构建 | Java 17、Android Gradle Plugin 9.0.1、Kotlin 2.3.20 |
 
 ## 项目结构
 
 ```text
 WordGameByAI/
-├── backend/                         # FastAPI 后端服务
-│   ├── agents/                      # 各类 Agent：主角、NPC、旁白、补丁、检查、管理、设定整理
-│   ├── routers/                     # API 路由：games、characters、turns、management 等
-│   ├── uploads/                     # 用户上传目录，实际文件默认不提交
-│   ├── database.py                  # 数据库连接、表初始化、默认模板种子数据
-│   ├── game_engine.py               # 剧情推进编排：加载上下文、调用 Agent、保存回合和快照
-│   ├── llm_client.py                # LangChain ChatOpenAI 调用封装
-│   ├── main.py                      # FastAPI 应用入口、CORS、静态文件、路由注册
-│   ├── management_service.py        # ManagementAgent 方案确认、白名单动作执行
-│   ├── models.py                    # SQLModel 数据模型
-│   ├── numeric_utils.py             # AI 生成数值字段的容错转换
-│   ├── prompt_builder.py            # Agent Prompt 构造与结构化输出约束
-│   ├── rag_service.py               # 动态记忆 RAG 索引、检索、回合记忆写入
-│   └── schemas.py                   # Pydantic 请求模型
-├── frontend/                        # Vue3 前端
-│   ├── src/
-│   │   ├── api/                     # Axios/fetch API 封装
-│   │   ├── components/              # 剧情日志、角色卡、管理 Agent 面板等组件
-│   │   ├── router/                  # 前端路由
-│   │   ├── stores/                  # Pinia 状态管理
-│   │   ├── styles/                  # 全局样式
-│   │   ├── utils/                   # 标签、预设、初始角色等工具
-│   │   └── views/                   # 存档、游戏、模板、综合管理等页面
-│   ├── package.json                 # 前端依赖和脚本
-│   └── vite.config.js               # Vite 配置
+├── backend/
+│   ├── agents/                 # 8 类 AI Agent
+│   ├── routers/                # REST、流式及移动 API
+│   ├── uploads/characters/     # 运行时头像；不提交实际文件
+│   ├── game_engine.py          # 多 Agent 编排与状态任务
+│   ├── prompt_builder.py       # Prompt 与结构化输出约束
+│   ├── rag_service.py          # 动态记忆索引、检索与回合记忆
+│   ├── patch_applier.py        # 白名单状态补丁
+│   ├── story_quality_service.py
+│   ├── auth_service.py
+│   ├── model_config_service.py
+│   ├── models.py
+│   └── main.py
+├── frontend/
+│   ├── public/assets/          # 品牌图标和 12 张 WebP 头像
+│   ├── src/api/
+│   ├── src/components/
+│   ├── src/stores/
+│   ├── src/utils/
+│   └── src/views/
+├── mobile/
+│   ├── assets/                 # Android 品牌和头像资源
+│   ├── lib/core/               # 配置、网络、安全令牌与通用 UI
+│   ├── lib/features/           # 登录、存档、剧情、管理与后台
+│   ├── android/
+│   └── test/
+├── tests/                      # Python 后端测试
 ├── docs/
-│   ├── PROJECT_STATUS.md            # 当前完成度、限制和路线
-│   └── 项目说明书.md                 # 更完整的项目说明文档
-├── tests/                           # 后端单元测试：RAG、快速模式、状态补丁、结构化输入等
-├── .gitignore                       # 忽略密钥、数据库、上传文件、依赖和构建产物
-├── SECURITY.md                      # 安全与隐私说明
-├── requirements.txt                 # 后端依赖
-└── README.md
+├── README.md
+├── SECURITY.md
+└── requirements.txt
 ```
 
 ## 快速开始
 
-### 1. 克隆项目
+### 1. 获取源码
 
 ```bash
 git clone https://github.com/LiPeiCong60/WordGameByAI.git
 cd WordGameByAI
 ```
 
-### 2. 安装后端依赖
+### 2. 启动后端
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-```
 
-### 3. 配置环境变量
-
-```bash
 cp backend/.env.example backend/.env
+cd backend
+uvicorn main:app --reload --port 8000
 ```
 
-编辑 `backend/.env`，填入自己的模型服务配置：
+在 `backend/.env` 中至少填写自己的 OpenAI-compatible 模型服务配置：
 
 ```env
 OPENAI_API_KEY=your_api_key_here
 OPENAI_BASE_URL=https://api.openai.com/v1
 OPENAI_MODEL=gpt-4o-mini
-MODEL_CONFIG_FILE=./model_configs.json
-DATABASE_URL=mysql+pymysql://wordgame:change_this_password@127.0.0.1:3306/wordgame?charset=utf8mb4
+DATABASE_URL=sqlite:///./narrative_agent.db
 CORS_ALLOW_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
-AUTH_TOKEN_TTL_DAYS=14
-NON_MEMBER_DAILY_MESSAGE_LIMIT=20
-MESSAGE_RATE_LIMIT_WINDOW_SECONDS=60
-MESSAGE_RATE_LIMIT_MAX_REQUESTS=10
+ADMIN_BOOTSTRAP_TOKEN=replace_with_a_long_random_secret
+ALLOW_FIRST_USER_ADMIN=false
 ```
 
-如果不配置 API Key，系统仍可启动，但 Agent 调用会返回 `LLM API key is not configured.`。
+> 不配置 API Key 时，账号、存档和数据管理仍可启动；调用 AI Agent 时会返回明确的配置错误。真实密钥只能保存在本地或服务器 `.env` / 私有模型配置中，不能提交到 Git。
 
-### 4. 启动后端
+后端入口：
 
-```bash
-cd backend
-source ../.venv/bin/activate
-uvicorn main:app --reload --port 8000
-```
-
-后端地址：
-
-- API 根路径：`http://localhost:8000/api`
-- Swagger 文档：`http://localhost:8000/docs`
+- Swagger：`http://localhost:8000/docs`
+- Web API：`http://localhost:8000/api`
+- Mobile API：`http://localhost:8000/api/v1`
 - 健康检查：`http://localhost:8000/api/health`
 
-### 5. 启动前端
-
-新开一个终端：
+### 3. 启动网页端
 
 ```bash
 cd frontend
-npm install
+npm ci
 npm run dev
 ```
 
-前端默认地址：
-
-```text
-http://localhost:5173
-```
-
-如果需要修改后端 API 地址，可以在启动时指定：
+默认访问 `http://localhost:5173`。连接其他后端时：
 
 ```bash
 VITE_API_BASE_URL=http://localhost:8000/api npm run dev
 ```
 
-## 环境变量说明
+生产构建：
 
-后端环境变量位于 `backend/.env`，仓库只提交 `backend/.env.example`。
-
-```env
-OPENAI_API_KEY=your_api_key_here
-OPENAI_BASE_URL=https://api.openai.com/v1
-OPENAI_MODEL=gpt-4o-mini
-MODEL_CONFIG_FILE=./model_configs.json
-DATABASE_URL=mysql+pymysql://wordgame:change_this_password@127.0.0.1:3306/wordgame?charset=utf8mb4
-CORS_ALLOW_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
-AUTH_TOKEN_TTL_DAYS=14
+```bash
+VITE_API_BASE_URL=https://your-domain.example/api npm run build
 ```
 
-| 变量 | 说明 | 是否必填 |
-| --- | --- | --- |
-| `OPENAI_API_KEY` | 大模型 API Key。真实密钥只放本地 `.env`，不要提交到 Git。 | 调用 Agent 时必填 |
-| `OPENAI_BASE_URL` | OpenAI-compatible API 地址，可接入兼容 OpenAI 协议的模型服务。 | 否，默认 OpenAI API |
-| `OPENAI_MODEL` | 使用的模型名称。 | 否，默认 `gpt-4o-mini` |
-| `MODEL_CONFIG_FILE` | 管理后台写入的模型池、模型等级和私有 API Key 配置文件路径。接口只返回 `has_api_key`，不会返回密钥内容。 | 否，默认 `backend/model_configs.json` |
-| `DATABASE_URL` | SQLModel 数据库连接地址。生产建议 MySQL，例如 `mysql+pymysql://wordgame:密码@127.0.0.1:3306/wordgame?charset=utf8mb4`；本地快速开发也可用 `sqlite:///./narrative_agent.db`。 | 否，默认本地 SQLite |
-| `CORS_ALLOW_ORIGINS` | 允许访问后端 API 的前端域名，公网部署时必须改成你的 HTTPS 域名。 | 否，本地开发地址 |
-| `AUTH_TOKEN_TTL_DAYS` | 登录 token 有效天数。 | 否，默认 `14` |
-| `NON_MEMBER_DAILY_MESSAGE_LIMIT` | 非会员每日可发送的大模型消息数上限。管理员和会员可在后台按用户调整。 | 否，默认 `20` |
-| `MESSAGE_RATE_LIMIT_WINDOW_SECONDS` | 消息短窗限流窗口秒数。 | 否，默认 `60` |
-| `MESSAGE_RATE_LIMIT_MAX_REQUESTS` | 单用户短窗内最多消息请求数。 | 否，默认 `10` |
-| `VITE_API_BASE_URL` | 前端 API 地址，运行前端时可通过环境变量传入。 | 否，默认 `http://localhost:8000/api` |
+## Android 客户端
 
-## API 接口说明
+`mobile/` 已包含 Android 平台工程，不要再次运行 `flutter create` 覆盖它。
 
-以下列出主要接口，完整参数和响应可在启动后端后访问 `http://localhost:8000/docs` 查看。
+### 本地模拟器调试
 
-| 方法 | 路径 | 功能说明 | 请求参数简述 |
-| --- | --- | --- | --- |
-| `GET` | `/api/health` | 健康检查 | 无 |
-| `GET` | `/api/auth/captcha` | 获取注册验证码 | 无 |
-| `POST` | `/api/auth/register` | 注册并登录 | Body: `RegisterRequest` |
-| `POST` | `/api/auth/login` | 登录 | Body: `LoginRequest` |
-| `GET` | `/api/auth/me` | 获取当前登录用户 | Header: `Authorization: Bearer <token>` |
-| `GET` | `/api/admin/summary` | 管理后台统计 | 管理员权限 |
-| `GET` | `/api/admin/users` | 管理后台用户列表 | 管理员权限 |
-| `PATCH` | `/api/admin/users/{user_id}` | 启停用户、授予或取消管理员权限 | 管理员权限 |
-| `PATCH` | `/api/admin/users/{user_id}/model-level` | 给用户分配模型等级 | 管理员权限 |
-| `GET` | `/api/admin/model-config` | 获取模型池、模型等级和分配关系，不返回 API Key 明文 | 管理员权限 |
-| `PUT` | `/api/admin/model-config/models` | 新增或更新模型配置，API Key 写入服务器私有配置文件 | 管理员权限 |
-| `PUT` | `/api/admin/model-config/levels` | 新增或更新模型等级，每个等级可为不同 Agent 指定模型 | 管理员权限 |
-| `GET` | `/api/admin/games` | 管理后台存档列表 | 管理员权限 |
-| `POST` | `/api/games` | 创建游戏存档 | Body: `GameCreate`，可传 `template_id` |
-| `GET` | `/api/games` | 获取存档列表 | 无 |
-| `GET` | `/api/games/{game_id}` | 获取单个存档 | Path: `game_id` |
-| `PATCH` | `/api/games/{game_id}` | 更新存档信息 | Path: `game_id`，Body: `GameUpdate` |
-| `DELETE` | `/api/games/{game_id}` | 删除存档及关联数据 | Path: `game_id` |
-| `GET` | `/api/templates` | 获取模板列表 | 无 |
-| `POST` | `/api/templates` | 创建模板 | Body: `TemplateCreate` |
-| `PATCH` | `/api/templates/{template_id}` | 更新模板 | Path: `template_id`，Body: `TemplateUpdate` |
-| `DELETE` | `/api/templates/{template_id}` | 删除模板 | Path: `template_id` |
-| `POST` | `/api/games/{game_id}/story-worlds` | 创建世界/副本 | Path: `game_id`，Body: `StoryWorldCreate` |
-| `GET` | `/api/games/{game_id}/story-worlds` | 获取世界/副本列表 | Path: `game_id` |
-| `POST` | `/api/games/{game_id}/story-worlds/{world_id}/set-current` | 设置当前世界 | Path: `game_id`, `world_id` |
-| `POST` | `/api/games/{game_id}/lore` | 创建世界观条目 | Path: `game_id`，Body: `LoreCreate` |
-| `GET` | `/api/games/{game_id}/lore` | 获取世界观列表 | Path: `game_id` |
-| `POST` | `/api/games/{game_id}/lore/organize` | 使用 LoreAgent 整理设定 | Path: `game_id`，Body: `{ text }` |
-| `POST` | `/api/games/{game_id}/characters` | 创建角色 | Path: `game_id`，Body: `CharacterCreate` |
-| `GET` | `/api/games/{game_id}/characters` | 获取角色列表 | Path: `game_id` |
-| `POST` | `/api/characters/{character_id}/avatar` | 上传角色头像 | FormData: `file` |
-| `POST` | `/api/games/{game_id}/opening` | 生成开场白 | Path: `game_id` |
-| `POST` | `/api/games/{game_id}/opening/stream` | 流式生成开场白 | Path: `game_id`，返回 NDJSON |
-| `POST` | `/api/games/{game_id}/turn` | 推进一轮剧情 | Path: `game_id`，Body: `TurnRequest` |
-| `POST` | `/api/games/{game_id}/turn/stream` | 流式推进剧情 | Path: `game_id`，Body: `TurnRequest`，返回 NDJSON |
-| `GET` | `/api/games/{game_id}/rag/memories` | 获取当前存档 RAG 记忆 | Path: `game_id` |
-| `POST` | `/api/games/{game_id}/rag/search` | 检索相关长期记忆 | Path: `game_id`，Body: `{ query, top_k }` |
-| `POST` | `/api/games/{game_id}/rag/rebuild` | 重建当前存档 RAG 记忆 | Path: `game_id` |
-| `DELETE` | `/api/turns/{turn_id}/from-here` | 删除该回合及之后剧情 | Path: `turn_id` |
-| `POST` | `/api/turns/{turn_id}/regenerate` | 重新生成指定回合 | Path: `turn_id` |
-| `POST` | `/api/turns/{turn_id}/regenerate/stream` | 流式重新生成指定回合 | Path: `turn_id`，返回 NDJSON |
-| `POST` | `/api/games/{game_id}/management/sessions` | 创建管理会话 | Path: `game_id`，Body: `ManagementSessionCreate` |
-| `GET` | `/api/games/{game_id}/management/sessions` | 获取管理会话列表 | Path: `game_id` |
-| `POST` | `/api/management/sessions/{session_id}/chat` | 发送管理 Agent 消息 | Path: `session_id`，Body: `{ message, scope }` |
-| `POST` | `/api/management/proposals/{proposal_id}/apply` | 确认执行修改方案 | Path: `proposal_id` |
-| `POST` | `/api/management/proposals/{proposal_id}/reject` | 拒绝修改方案 | Path: `proposal_id` |
-| `GET` | `/api/games/{game_id}/export` | 导出存档 JSON | Path: `game_id` |
-| `POST` | `/api/games/import` | 导入存档 JSON | Body: `ImportPayload` |
-
-## 权限与隐私模型
-
-- 第一个注册用户会自动成为管理员。
-- 普通用户只能查看、编辑、删除自己的存档。
-- 管理员可以查看后台统计、用户列表和所有存档列表。
-- 公共模板 `owner_user_id = null`，所有用户可见；管理员创建的是公共模板。
-- 普通用户创建的模板带有自己的 `owner_user_id`，只有自己和管理员可见。
-- 真实 `.env`、`backend/model_configs.json`、本地 SQLite 数据库、上传头像、构建产物和依赖目录都被 `.gitignore` 排除，不应提交到 GitHub。
-
-## 公网部署
-
-详细清单见 [公网部署准备清单](docs/公网部署准备清单.md)。核心原则：
-
-- 后端只监听内网地址，例如 `127.0.0.1:8010`，不要把后端端口直接暴露公网。
-- 用 Nginx / Caddy 通过 `/api` 反向代理到 FastAPI，通过 `/uploads` 提供上传资源。
-- 前端构建时设置 `VITE_API_BASE_URL=https://你的域名/api`。
-- 生产环境只在服务器私有 `.env` 或后台生成的 `backend/model_configs.json` 中保存真实模型 API Key；前端不会通过接口读取到密钥明文。
-- 正式多人使用建议使用 MySQL，并配置备份。
-
-### MySQL 数据库
-
-服务器上可以先创建数据库和专用账号：
-
-```sql
-CREATE DATABASE wordgame CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-CREATE USER 'wordgame'@'127.0.0.1' IDENTIFIED BY '替换成强密码';
-GRANT ALL PRIVILEGES ON wordgame.* TO 'wordgame'@'127.0.0.1';
-FLUSH PRIVILEGES;
+```bash
+cd mobile
+flutter pub get
+flutter run \
+  --dart-define=API_BASE_URL=http://10.0.2.2:8000/api/v1
 ```
 
-然后在 `backend/.env` 中设置：
+### 公网 API 构建
 
-```env
-DATABASE_URL=mysql+pymysql://wordgame:替换成强密码@127.0.0.1:3306/wordgame?charset=utf8mb4
+```bash
+flutter build apk --release \
+  --dart-define=API_BASE_URL=https://your-domain.example/api/v1
 ```
 
-首次启动后端时会自动创建表结构。已有 SQLite 老数据不会自动迁移到 MySQL，若需要迁移，应先导出存档或编写一次性迁移脚本。
+Android 令牌通过 Keychain/Keystore 安全存储；遇到 401 会自动轮换刷新令牌并重试。当前 `0.4.0+4` APK 仍属于测试发行版：应用 ID 是 `com.example.word_game_by_ai`，release 构建仍使用开发签名，且开发 Manifest 为兼容临时 IP 服务允许 HTTP。提交应用商店前必须改为唯一包名、正式私有签名和 HTTPS，并禁止 release 明文流量。
 
-### TurnRequest 示例
+更多说明见 [mobile/README.md](mobile/README.md)。
 
-剧情推进接口兼容旧版 `{ "user_input": "..." }`，也支持更适合文字 RPG 的结构化输入：
+## API 设计
 
-```json
-{
-  "action_input": "带杯热可可下楼，观察她的反应，希望气氛自然一点",
-  "dialogue_input": "今天怎么想起我了，大忙人",
-  "auto_complete_blank": true,
-  "fast_mode": true
-}
-```
+核心资源同时提供两套前缀：
 
-字段说明：
+- Web 兼容接口：`/api`
+- 移动版本接口：`/api/v1`
 
-| 字段 | 说明 |
-| --- | --- |
-| `user_input` | 旧版单文本输入，仍然兼容。 |
-| `action_input` | 玩家希望主角执行的行动、场景背景或希望剧情怎样响应。 |
-| `dialogue_input` | 主角本轮实际说出口的台词。 |
-| `auto_complete_blank` | 某个输入为空时，是否允许系统结合上下文补动作或短对白。关闭时，台词留空表示主角明确不主动说话。 |
-| `fast_mode` | 是否启用快速模式。快速模式减少前置 LLM 调用，更快开始流式输出。 |
-
-## 动态记忆 RAG 流程
+移动端额外提供聚合与同步接口：
 
 ```text
-世界观 / 角色记忆 / 世界事件 / 历史回合
-        ↓
-sync_rag_memories / store_turn_memory
-        ↓
-RagMemory 本地向量索引
-        ↓
-retrieve_related_memories 按本轮输入检索
-        ↓
-注入 ProtagonistAgent / NPCReactionAgent / NarratorAgent 上下文
-        ↓
-生成剧情后写入新的回合摘要记忆
+GET /api/v1/mobile/config
+GET /api/v1/games/{id}/bootstrap
+GET /api/v1/games/{id}/turns
+GET /api/v1/games/{id}/state-sync
 ```
 
-这个 RAG 不是只在开局加载固定知识库，而是会随着剧情推进持续更新。每轮剧情保存后，系统会把可复用的剧情摘要、NPC 反应、状态变化和检查结果写成新的长期记忆，后续回合可以按语义检索回来。
+接口特性包括 NDJSON 流式剧情、`request_id` / `X-Request-ID` 幂等、单存档生成租约、游标分页、短窗限流、每日额度、存档归属校验和管理员权限。完整的 60 多个路由及请求模型请以运行时 Swagger `/docs` 为准。
 
-## 测试与构建
+## 测试与质量
 
-后端单元测试：
+当前源码声明 66 项自动化测试：
+
+| 测试层 | 数量 | 重点 |
+| --- | ---: | --- |
+| Python 后端 | 46 | 认证、权限、RAG、并发租约、事务、Prompt 脱敏、JSON 容错、额度、头像 |
+| Flutter | 15 | API 错误、剧情拆分、表单、网络层、默认头像 |
+| Vue / Node | 5 | 默认头像资源与标签匹配 |
+
+运行命令：
 
 ```bash
-source .venv/bin/activate
-python -m unittest discover -s tests -v
-python -m compileall backend tests
+# 后端
+python -m pytest -q
+
+# Web
+cd frontend && npm test && npm run build
+
+# Android
+cd mobile && flutter analyze && flutter test
 ```
 
-前端构建：
-
-```bash
-cd frontend
-npm run build
-```
+前端目前只有头像工具测试，尚未建立组件测试与 E2E；“66 项”是源码中的测试声明数，不等同于完整生产验收。
 
 ## 安全与隐私
 
-项目只提交源码和公开配置模板，不提交真实 `.env`、API Key、本地 SQLite 数据库、游戏存档、用户上传头像、虚拟环境、依赖目录和构建产物。详细说明见 [SECURITY.md](SECURITY.md)。
+发布仓库只应包含源码和演示资源：
 
-如果密钥曾被误提交，应立即在对应平台轮换密钥，并在公开仓库前清理 Git 历史。
+- `.env`、模型私有配置及备份、数据库及 WAL/SHM、用户上传、日志、签名文件、Firebase/Apple 配置、依赖与构建产物均被 `.gitignore` 排除。
+- 密码使用 PBKDF2-SHA256、240,000 次迭代和随机盐。
+- 数据库只保存访问令牌与刷新令牌哈希；刷新令牌会轮换，注销会撤销会话。
+- 首位管理员必须提供服务端 `ADMIN_BOOTSTRAP_TOKEN`；公开注册默认不会自动提权。
+- 普通用户只能操作自己的存档。
+- 模型管理接口只返回 `has_api_key`，不会返回 API Key 明文；私有配置写入后会尝试设置为 `0600`。
+- 头像上传限制 PNG/JPEG/WebP，检查文件签名，最大 2 MiB。
+- AI 修改必须经过提案确认与服务端白名单。
+
+仍需了解的边界：Web 令牌当前存放在 `localStorage`；内置验证码是轻量算术验证码；头像上传目录经 `/uploads` 提供静态访问。正式开放注册前建议迁移 HttpOnly/Secure/SameSite Cookie、增加 IP/账号登录限速，并接入 Turnstile、hCaptcha 或 reCAPTCHA。
+
+请阅读 [SECURITY.md](SECURITY.md)。如发现漏洞，不要在公开 Issue 中粘贴密钥、令牌、用户数据或可直接利用的细节。
+
+## 部署到公网
+
+```text
+Browser / Android
+        │ HTTPS
+        ▼
+      Nginx
+   ├── /          → frontend/dist
+   ├── /api       → 127.0.0.1:8010
+   └── /uploads   → backend/uploads
+        │
+        ▼
+ FastAPI + MySQL
+        │
+        ▼
+OpenAI-compatible LLM
+```
+
+生产原则：
+
+- FastAPI 只监听 `127.0.0.1:8010`，不直接暴露应用端口。
+- `/api`、`/api/v1` 和 `/uploads` 都通过 Nginx/Caddy 反代。
+- Web 与 Android 统一使用 HTTPS。
+- `.env`、模型私有配置、数据库、上传文件和签名材料只留在服务器或 CI Secret。
+- SQLite 适合本地开发；正式多人服务建议 MySQL，并配置数据库与上传目录备份。
+- 前端构建时写入正式 API 域名；更新源码不会自动把 SQLite 数据迁移到 MySQL。
+
+详细步骤：
+
+- [公网部署准备清单](docs/公网部署准备清单.md)
+- [公网部署与迁移手册](docs/公网部署与迁移手册.md)
+
+## 已知限制与路线图
+
+- AI 质量、延迟和费用取决于外部模型服务。
+- 当前 RAG 是轻量稳定哈希向量，不是专业 Embedding + 向量数据库。
+- SQLite、本地上传和进程内任务不适合多实例横向扩展。
+- 数据库升级仍使用启动时轻量迁移，尚未引入 Alembic。
+- 尚无 Docker / Docker Compose、GitHub Actions 和端到端测试。
+- “分支”目前是从指定回合删除后续再生成，不是多分支树并存。
+- Android 上架所需正式包名、release keystore、HTTPS 强制和商店材料尚未完成。
+- iOS 平台目录存在，但本阶段只完成并验证 Android，不宣称正式支持 iOS。
+- Web 登录态未来应迁移到服务端 HttpOnly Cookie。
+- 默认头像可继续扩充风格、年龄与更多角色标签。
+
+优先路线：生产 HTTPS 与 Android 正式签名 → Docker 化和 Alembic → CI + Web/Android E2E → Redis/任务队列与对象存储 → 专业向量数据库与可选 Embedding → iOS 验证。
+
+## 文档
+
+- [项目说明书](docs/项目说明书.md)
+- [项目状态](docs/PROJECT_STATUS.md)
+- [AI 输出质量诊断](docs/AI_OUTPUT_QUALITY.md)
+- [公网部署准备清单](docs/公网部署准备清单.md)
+- [公网部署与迁移手册](docs/公网部署与迁移手册.md)
+- [安全与隐私](SECURITY.md)
+
+## 贡献与许可
+
+欢迎通过 Issue 提交可复现的问题、功能建议或文档改进，并在 Pull Request 中附上对应测试。
+
+当前仓库尚未附加开源许可证，默认保留全部权利（All rights reserved）。公开可见不代表允许复制、修改或再分发；如需将项目正式开源，请由仓库所有者选择并添加 MIT、Apache-2.0、GPL 等合适许可证。

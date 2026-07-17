@@ -13,14 +13,16 @@ from sqlmodel import Session, select
 
 from database import get_session
 from models import AuthToken, CaptchaChallenge, Game, User
+from time_utils import utc_now
 
 PASSWORD_ITERATIONS = 240_000
-TOKEN_TTL_DAYS = int(os.getenv("AUTH_TOKEN_TTL_DAYS", "14"))
+ACCESS_TOKEN_TTL_MINUTES = int(os.getenv("ACCESS_TOKEN_TTL_MINUTES", "60"))
+REFRESH_TOKEN_TTL_DAYS = int(os.getenv("REFRESH_TOKEN_TTL_DAYS", os.getenv("AUTH_TOKEN_TTL_DAYS", "14")))
 CAPTCHA_TTL_MINUTES = 10
 
 
 def _utcnow() -> datetime:
-    return datetime.utcnow()
+    return utc_now()
 
 
 def _sha256(text: str) -> str:
@@ -115,19 +117,35 @@ def _validate_password(password: str) -> str:
     return password
 
 
-def register_user(db: Session, username: str, password: str, email: str, captcha_id: str, captcha_answer: str) -> dict:
+def _bootstrap_admin_allowed(db: Session, bootstrap_token: str) -> bool:
+    if db.exec(select(User).where(User.is_admin == True)).first():  # noqa: E712
+        return False
+    expected = os.getenv("ADMIN_BOOTSTRAP_TOKEN", "").strip()
+    if expected and bootstrap_token:
+        return hmac.compare_digest(expected, bootstrap_token.strip())
+    return os.getenv("ALLOW_FIRST_USER_ADMIN", "false").strip().lower() in {"1", "true", "yes"}
+
+
+def register_user(
+    db: Session,
+    username: str,
+    password: str,
+    email: str,
+    captcha_id: str,
+    captcha_answer: str,
+    bootstrap_token: str = "",
+) -> dict:
     verify_captcha(db, captcha_id, captcha_answer)
     username = _validate_username(username)
     password = _validate_password(password)
     existing = db.exec(select(User).where(User.username == username)).first()
     if existing:
         raise HTTPException(status_code=409, detail="用户名已存在。")
-    is_first_user = db.exec(select(User)).first() is None
     user = User(
         username=username,
         email=(email or "").strip(),
         password_hash=hash_password(password),
-        is_admin=is_first_user,
+        is_admin=_bootstrap_admin_allowed(db, bootstrap_token),
     )
     db.add(user)
     db.commit()
@@ -136,22 +154,67 @@ def register_user(db: Session, username: str, password: str, email: str, captcha
 
 
 def issue_token(db: Session, user: User) -> dict:
-    raw_token = secrets.token_urlsafe(32)
-    token = AuthToken(
-        user_id=user.id,
-        token_hash=_sha256(raw_token),
-        expires_at=_utcnow() + timedelta(days=TOKEN_TTL_DAYS),
-    )
+    raw_token, token = _create_token(db, user, "access", _utcnow() + timedelta(minutes=ACCESS_TOKEN_TTL_MINUTES))
+    raw_refresh, refresh = _create_token(db, user, "refresh", _utcnow() + timedelta(days=REFRESH_TOKEN_TTL_DAYS))
     user.last_login_at = _utcnow()
-    db.add(token)
     db.add(user)
     db.commit()
     return {
         "token": raw_token,
         "token_type": "bearer",
         "expires_at": token.expires_at.isoformat(),
+        "refresh_token": raw_refresh,
+        "refresh_expires_at": refresh.expires_at.isoformat(),
         "user": public_user(user),
     }
+
+
+def _create_token(db: Session, user: User, kind: str, expires_at: datetime) -> tuple[str, AuthToken]:
+    raw_token = secrets.token_urlsafe(32)
+    token = AuthToken(
+        user_id=int(user.id),
+        token_hash=_sha256(raw_token),
+        expires_at=expires_at,
+        kind=kind,
+    )
+    db.add(token)
+    return raw_token, token
+
+
+def refresh_user_session(db: Session, raw_refresh_token: str) -> dict:
+    token = db.exec(
+        select(AuthToken).where(
+            AuthToken.token_hash == _sha256((raw_refresh_token or "").strip()),
+            AuthToken.kind == "refresh",
+        )
+    ).first()
+    if not token or token.revoked or token.expires_at < _utcnow():
+        raise HTTPException(status_code=401, detail="刷新凭证无效或已过期。")
+    user = db.get(User, token.user_id)
+    if not user or not user.is_active:
+        raise HTTPException(status_code=401, detail="账号不可用。")
+    token.revoked = True
+    db.add(token)
+    return issue_token(db, user)
+
+
+def revoke_access_token(db: Session, raw_token: str) -> None:
+    token = db.exec(select(AuthToken).where(AuthToken.token_hash == _sha256(raw_token))).first()
+    if token:
+        token.revoked = True
+        db.add(token)
+        db.commit()
+
+
+def revoke_user_session(db: Session, raw_access_token: str, raw_refresh_token: str = "") -> None:
+    hashes = {_sha256(raw_access_token)}
+    if raw_refresh_token:
+        hashes.add(_sha256(raw_refresh_token.strip()))
+    tokens = db.exec(select(AuthToken).where(AuthToken.token_hash.in_(hashes))).all()
+    for token in tokens:
+        token.revoked = True
+        db.add(token)
+    db.commit()
 
 
 def login_user(db: Session, username: str, password: str, captcha_id: str | None = None, captcha_answer: str | None = None) -> dict:
@@ -170,13 +233,28 @@ def get_current_user(
     if not authorization or not authorization.lower().startswith("bearer "):
         raise HTTPException(status_code=401, detail="请先登录。")
     raw_token = authorization.split(" ", 1)[1].strip()
-    token = db.exec(select(AuthToken).where(AuthToken.token_hash == _sha256(raw_token))).first()
+    token = db.exec(
+        select(AuthToken).where(
+            AuthToken.token_hash == _sha256(raw_token),
+            AuthToken.kind == "access",
+        )
+    ).first()
     if not token or token.revoked or token.expires_at < _utcnow():
         raise HTTPException(status_code=401, detail="登录已过期，请重新登录。")
     user = db.get(User, token.user_id)
     if not user or not user.is_active:
         raise HTTPException(status_code=401, detail="账号不可用。")
+    if not token.last_used_at or token.last_used_at < _utcnow() - timedelta(minutes=5):
+        token.last_used_at = _utcnow()
+        db.add(token)
+        db.commit()
     return user
+
+
+def bearer_token_value(authorization: str | None) -> str:
+    if not authorization or not authorization.lower().startswith("bearer "):
+        raise HTTPException(status_code=401, detail="请先登录。")
+    return authorization.split(" ", 1)[1].strip()
 
 
 def require_admin(user: User = Depends(get_current_user)) -> User:

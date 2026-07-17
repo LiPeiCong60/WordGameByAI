@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Any, Type
 
 from fastapi import HTTPException
 from sqlmodel import Session, SQLModel, select
+from time_utils import utc_now
 
 
 def to_data(payload: Any, exclude_unset: bool = False) -> dict[str, Any]:
@@ -38,31 +38,47 @@ def list_by_game(session: Session, model: Type[SQLModel], game_id: int) -> list[
     return list(session.exec(select(model).where(model.game_id == game_id)).all())
 
 
-def create_record(session: Session, model: Type[SQLModel], payload: Any, extra: dict[str, Any] | None = None) -> SQLModel:
+def create_record(
+    session: Session,
+    model: Type[SQLModel],
+    payload: Any,
+    extra: dict[str, Any] | None = None,
+    *,
+    commit: bool = True,
+) -> SQLModel:
     data = to_data(payload)
     if extra:
         data.update(extra)
     record = model(**data)
     session.add(record)
-    session.commit()
-    session.refresh(record)
+    if commit:
+        session.commit()
+        session.refresh(record)
+    else:
+        session.flush()
     return record
 
 
-def update_record(session: Session, record: SQLModel, payload: Any) -> SQLModel:
+def update_record(session: Session, record: SQLModel, payload: Any, *, commit: bool = True) -> SQLModel:
     data = to_data(payload, exclude_unset=True)
     for key, value in data.items():
         if hasattr(record, key):
             setattr(record, key, value)
     if hasattr(record, "updated_at"):
-        setattr(record, "updated_at", datetime.utcnow())
+        setattr(record, "updated_at", utc_now())
     session.add(record)
-    session.commit()
-    session.refresh(record)
+    if commit:
+        session.commit()
+        session.refresh(record)
+    else:
+        session.flush()
     return record
 
 
-def delete_record(session: Session, record: SQLModel) -> dict[str, bool]:
+def delete_record(session: Session, record: SQLModel, *, commit: bool = True) -> dict[str, bool]:
     session.delete(record)
-    session.commit()
+    if commit:
+        session.commit()
+    else:
+        session.flush()
     return {"ok": True}

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class FlexibleModel(BaseModel):
@@ -29,16 +29,17 @@ class CaptchaResponse(FlexibleModel):
 
 
 class RegisterRequest(FlexibleModel):
-    username: str
-    password: str
-    email: str = ""
+    username: str = Field(min_length=3, max_length=32)
+    password: str = Field(min_length=8, max_length=256)
+    email: str = Field(default="", max_length=200)
     captcha_id: str
     captcha_answer: str
+    bootstrap_token: str = ""
 
 
 class LoginRequest(FlexibleModel):
-    username: str
-    password: str
+    username: str = Field(min_length=3, max_length=32)
+    password: str = Field(min_length=1, max_length=256)
     captcha_id: str
     captcha_answer: str
 
@@ -57,6 +58,16 @@ class AuthTokenResponse(FlexibleModel):
     token_type: str = "bearer"
     expires_at: str
     user: AuthUserResponse
+    refresh_token: str = ""
+    refresh_expires_at: str = ""
+
+
+class RefreshTokenRequest(FlexibleModel):
+    refresh_token: str
+
+
+class LogoutRequest(FlexibleModel):
+    refresh_token: str = ""
 
 
 class AdminUserUpdate(FlexibleModel):
@@ -228,13 +239,14 @@ class CharacterUpdate(FlexibleModel):
 
 
 class TurnRequest(FlexibleModel):
-    user_input: str = ""
-    action_input: str = ""
-    dialogue_input: str = ""
+    user_input: str = Field(default="", max_length=12000)
+    action_input: str = Field(default="", max_length=8000)
+    dialogue_input: str = Field(default="", max_length=4000)
     auto_complete_blank: bool = True
     fast_mode: bool = False
     skip_state_update: bool = False
     async_state_update: bool = False
+    request_id: str = Field(default="", max_length=100)
 
     def effective_user_input(self) -> str:
         action = (self.action_input or "").strip()
@@ -263,8 +275,8 @@ class TurnRequest(FlexibleModel):
 
 
 class RagSearchRequest(FlexibleModel):
-    query: str
-    top_k: int = 6
+    query: str = Field(min_length=1, max_length=4000)
+    top_k: int = Field(default=6, ge=1, le=20)
 
 
 class ManagementSessionCreate(FlexibleModel):
@@ -272,8 +284,8 @@ class ManagementSessionCreate(FlexibleModel):
 
 
 class ManagementChatRequest(FlexibleModel):
-    message: str
-    scope: str = ""
+    message: str = Field(min_length=1, max_length=12000)
+    scope: str = Field(default="", max_length=100)
 
 
 class ImportPayload(FlexibleModel):
@@ -285,3 +297,18 @@ class ImportPayload(FlexibleModel):
     rag_memories: list[dict[str, Any]] = Field(default_factory=list)
     management_sessions: list[dict[str, Any]] = Field(default_factory=list)
     management_proposals: list[dict[str, Any]] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_import_size(self):
+        collections = [
+            self.story_worlds,
+            self.world_lore,
+            self.characters,
+            self.turn_logs,
+            self.rag_memories,
+            self.management_sessions,
+            self.management_proposals,
+        ]
+        if sum(len(items) for items in collections) > 50_000:
+            raise ValueError("导入存档记录数不能超过 50000。")
+        return self

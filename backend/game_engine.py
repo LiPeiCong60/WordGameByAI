@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import re
+import logging
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
-from datetime import datetime
+from datetime import timedelta
 
-from sqlalchemy import or_
+from sqlalchemy import or_, update
 from sqlmodel import Session, desc, func, select
 
 from agents.checker_agent import run_checker_agent
@@ -17,12 +18,15 @@ from agents.protagonist_agent import run_protagonist_agent, run_protagonist_fall
 from export_import import export_game
 from json_utils import dump_json_field, safe_json_loads
 from llm_client import current_llm_user_id, reset_current_llm_user, set_current_llm_user
-from models import Character, Game, StoryWorld, TurnLog, TurnSnapshot, WorldLore, WorldTemplate
+from models import Character, Game, StoryWorld, TurnLog, TurnSnapshot, TurnStateJob, WorldLore, WorldTemplate
 from numeric_utils import as_int
 from patch_applier import apply_state_patch, format_state_text
 from rag_service import attach_retrieved_memories, store_turn_memory
+from story_quality_service import analyze_story_quality, attach_quality_diagnostics
+from time_utils import utc_now
 
 STATE_SYNC_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="state-sync")
+logger = logging.getLogger(__name__)
 STATE_HINT_START = "<STATE_HINT>"
 STATE_HINT_END = "</STATE_HINT>"
 STATE_HINT_OPEN_RE = re.compile(r"<\s*(?:dummy_)?state[_-]?hint\s*>", re.IGNORECASE)
@@ -82,6 +86,7 @@ def save_turn_and_snapshot(
     checker_result: dict,
     snapshot_before_turn: dict,
     session: Session,
+    client_request_id: str | None = None,
 ) -> TurnLog:
     turn = TurnLog(
         game_id=game_id,
@@ -91,10 +96,10 @@ def save_turn_and_snapshot(
         npc_reactions=dump_json_field(npc_reactions),
         state_patch=dump_json_field(state_patch),
         checker_result=dump_json_field(checker_result),
+        client_request_id=client_request_id,
     )
     session.add(turn)
-    session.commit()
-    session.refresh(turn)
+    session.flush()
     snapshot = TurnSnapshot(
         game_id=game_id,
         turn_id=turn.id,
@@ -103,6 +108,7 @@ def save_turn_and_snapshot(
     )
     session.add(snapshot)
     session.commit()
+    session.refresh(turn)
     return turn
 
 
@@ -122,6 +128,30 @@ def _compose_visible_story(protagonist_turn: dict, narrator_story: str) -> str:
 
 def _has_turn_logs(game_id: int, session: Session) -> bool:
     return session.exec(select(TurnLog).where(TurnLog.game_id == game_id).limit(1)).first() is not None
+
+
+def find_turn_by_request_id(game_id: int, request_id: str | None, session: Session) -> TurnLog | None:
+    if not request_id:
+        return None
+    return session.exec(
+        select(TurnLog).where(
+            TurnLog.game_id == game_id,
+            TurnLog.client_request_id == request_id,
+        )
+    ).first()
+
+
+def saved_turn_result(turn: TurnLog) -> dict:
+    return {
+        "visible_story": turn.ai_response,
+        "npc_reactions": safe_json_loads(turn.npc_reactions, default={}),
+        "state_patch": safe_json_loads(turn.state_patch, default={}),
+        "checker_result": safe_json_loads(turn.checker_result, default={}),
+        "apply_result": {"ok": True, "reused": True},
+        "turn_id": turn.id,
+        "request_id": turn.client_request_id or "",
+        "reused": True,
+    }
 
 
 def _empty_state_patch() -> dict:
@@ -165,7 +195,7 @@ def _normalize_state_hint(raw_hint) -> dict:
     }
 
 
-def _apply_state_hint(game_id: int, raw_hint, session: Session) -> dict:
+def _apply_state_hint(game_id: int, raw_hint, session: Session, *, commit: bool = True) -> dict:
     hint = _normalize_state_hint(raw_hint)
     applied = _empty_state_patch()
     applied["state_hint"] = True
@@ -218,7 +248,7 @@ def _apply_state_hint(game_id: int, raw_hint, session: Session) -> dict:
         session.add(character)
         applied_characters.append(applied_item)
 
-    if applied_characters or applied.get("current_state_update"):
+    if commit and (applied_characters or applied.get("current_state_update")):
         session.commit()
     applied["updated_characters"] = applied_characters
     return applied
@@ -316,7 +346,7 @@ def _pending_checker_result() -> dict:
         "issues": [],
         "pending": True,
         "async_state_update": True,
-        "queued_at": datetime.utcnow().isoformat(),
+        "queued_at": utc_now().isoformat(),
         "message": "状态整理已转入后台执行。",
     }
 
@@ -351,17 +381,20 @@ def _resolve_state_update(
 
     apply_result = None
     if checker_result.get("ok"):
-        apply_result = apply_state_patch(game_id, state_patch, session)
+        apply_result = apply_state_patch(game_id, state_patch, session, commit=False)
     return state_patch, checker_result, apply_result
 
 
 def _mark_turn_state_sync_failed(turn: TurnLog, message: str, session: Session) -> dict:
+    previous_checker = safe_json_loads(turn.checker_result, default={})
     checker_result = {
         "ok": False,
         "issues": [{"message": message}],
         "pending": False,
         "async_state_update": True,
     }
+    if isinstance(previous_checker, dict) and previous_checker.get("output_quality"):
+        checker_result["output_quality"] = previous_checker["output_quality"]
     turn.checker_result = dump_json_field(checker_result)
     session.add(turn)
     session.commit()
@@ -402,10 +435,14 @@ def _finalize_async_state_update(
             visible_story,
             session,
         )
-    except Exception as exc:
-        return _mark_turn_state_sync_failed(turn, f"后台状态同步失败：{exc}", session)
+    except Exception:
+        logger.exception("Async state update failed game_id=%s turn_id=%s", game_id, turn_id)
+        return _mark_turn_state_sync_failed(turn, "后台状态同步失败，请稍后重试或使用精细模式重新生成。", session)
 
+    previous_checker = safe_json_loads(turn.checker_result, default={})
     checker_result = {**checker_result, "pending": False, "async_state_update": True}
+    if isinstance(previous_checker, dict) and previous_checker.get("output_quality"):
+        checker_result["output_quality"] = previous_checker["output_quality"]
     turn.state_patch = dump_json_field(state_patch)
     turn.checker_result = dump_json_field(checker_result)
     session.add(turn)
@@ -415,22 +452,56 @@ def _finalize_async_state_update(
 
 
 def _run_async_state_update_job(
-    game_id: int,
-    turn_id: int,
-    context: dict,
-    user_input: str,
-    npc_reactions: dict,
-    visible_story: str,
-    user_id: int | None = None,
+    job_id: int,
 ) -> None:
     from database import engine
 
-    token = set_current_llm_user(user_id)
     with Session(engine) as session:
+        stale_before = utc_now() - timedelta(minutes=20)
+        claim = session.exec(
+            update(TurnStateJob)
+            .where(
+                TurnStateJob.id == job_id,
+                or_(
+                    TurnStateJob.status == "pending",
+                    (TurnStateJob.status == "running") & (TurnStateJob.updated_at < stale_before),
+                ),
+            )
+            .values(status="running", attempts=TurnStateJob.attempts + 1, updated_at=utc_now())
+        )
+        session.commit()
+        if not claim.rowcount:
+            return
+        job = session.get(TurnStateJob, job_id)
+        if not job:
+            return
+        payload = safe_json_loads(job.payload_json, default={})
+        token = set_current_llm_user(job.owner_user_id)
         try:
-            _finalize_async_state_update(game_id, turn_id, context, user_input, npc_reactions, visible_story, session)
+            result = _finalize_async_state_update(
+                job.game_id,
+                job.turn_id,
+                payload.get("context") or {},
+                str(payload.get("user_input") or ""),
+                payload.get("npc_reactions") or {},
+                str(payload.get("visible_story") or ""),
+                session,
+            )
+            if isinstance(result, dict) and result.get("ok") is False:
+                job.status = "failed"
+                issues = result.get("issues") or []
+                job.last_error = str(issues[0].get("message") if issues and isinstance(issues[0], dict) else "状态同步失败")[:1000]
+            else:
+                job.status = "completed"
+                job.last_error = ""
+        except Exception as exc:
+            job.status = "failed"
+            job.last_error = str(exc)[:1000]
         finally:
             reset_current_llm_user(token)
+            job.updated_at = utc_now()
+            session.add(job)
+            session.commit()
 
 
 def _schedule_async_state_update(
@@ -442,24 +513,66 @@ def _schedule_async_state_update(
     visible_story: str,
 ) -> None:
     user_id = current_llm_user_id()
-    STATE_SYNC_EXECUTOR.submit(
-        _run_async_state_update_job,
-        game_id,
-        turn_id,
-        context,
-        user_input,
-        npc_reactions,
-        visible_story,
-        user_id,
-    )
+    from database import engine
+
+    with Session(engine) as session:
+        job = session.exec(select(TurnStateJob).where(TurnStateJob.turn_id == turn_id)).first()
+        if not job:
+            job = TurnStateJob(game_id=game_id, turn_id=turn_id, owner_user_id=user_id)
+        job.status = "pending"
+        job.payload_json = dump_json_field(
+            {
+                "context": context,
+                "user_input": user_input,
+                "npc_reactions": npc_reactions,
+                "visible_story": visible_story,
+            }
+        )
+        job.last_error = ""
+        job.updated_at = utc_now()
+        session.add(job)
+        session.commit()
+        session.refresh(job)
+        job_id = int(job.id)
+    STATE_SYNC_EXECUTOR.submit(_run_async_state_update_job, job_id)
 
 
-def _save_opening_turn(game_id: int, visible_story: str, snapshot_before_turn: dict, context: dict, session: Session) -> dict:
+def recover_pending_state_jobs() -> int:
+    from database import engine
+
+    stale_before = utc_now() - timedelta(minutes=20)
+    with Session(engine) as session:
+        jobs = session.exec(
+            select(TurnStateJob).where(
+                or_(
+                    TurnStateJob.status == "pending",
+                    (TurnStateJob.status == "running") & (TurnStateJob.updated_at < stale_before),
+                )
+            )
+        ).all()
+        job_ids = [int(job.id) for job in jobs if job.id is not None]
+    for job_id in job_ids:
+        STATE_SYNC_EXECUTOR.submit(_run_async_state_update_job, job_id)
+    return len(job_ids)
+
+
+def _save_opening_turn(
+    game_id: int,
+    visible_story: str,
+    snapshot_before_turn: dict,
+    context: dict,
+    session: Session,
+    request_id: str | None = None,
+) -> dict:
     state_patch = _core_state_patch(run_patch_agent(context, "系统开场白", {"reactions": []}, visible_story))
     checker_result = run_checker_agent(context, visible_story, state_patch)
+    checker_result = attach_quality_diagnostics(
+        checker_result,
+        analyze_story_quality(visible_story, recent_turns=context.get("recent_turns", [])),
+    )
     apply_result = None
     if checker_result.get("ok"):
-        apply_result = apply_state_patch(game_id, state_patch, session)
+        apply_result = apply_state_patch(game_id, state_patch, session, commit=False)
 
     turn = save_turn_and_snapshot(
         game_id=game_id,
@@ -471,6 +584,7 @@ def _save_opening_turn(game_id: int, visible_story: str, snapshot_before_turn: d
         checker_result=checker_result,
         snapshot_before_turn=snapshot_before_turn,
         session=session,
+        client_request_id=request_id,
     )
     rag_memory = store_turn_memory(
         game_id,
@@ -489,10 +603,14 @@ def _save_opening_turn(game_id: int, visible_story: str, snapshot_before_turn: d
         "apply_result": apply_result,
         "turn_id": turn.id,
         "rag_memory_id": rag_memory.id if rag_memory else None,
+        "request_id": request_id or "",
     }
 
 
-def run_opening_turn(game_id: int, session: Session) -> dict:
+def run_opening_turn(game_id: int, session: Session, request_id: str | None = None) -> dict:
+    existing = find_turn_by_request_id(game_id, request_id, session)
+    if existing:
+        return {"ok": True, "skipped": False, **saved_turn_result(existing)}
     if _has_turn_logs(game_id, session):
         return {"ok": True, "skipped": True, "message": "当前存档已经有剧情记录，不重复生成开场白。"}
     base_context = load_game_context(game_id, session)
@@ -504,11 +622,15 @@ def run_opening_turn(game_id: int, session: Session) -> dict:
     snapshot_before_turn = export_game(game_id, session)
     story = run_opening_agent(context)
     visible_story = str(story.get("visible_story") or "").strip() or "开场白生成失败：模型没有返回内容。"
-    result = _save_opening_turn(game_id, visible_story, snapshot_before_turn, context, session)
+    result = _save_opening_turn(game_id, visible_story, snapshot_before_turn, context, session, request_id=request_id)
     return {"ok": True, "skipped": False, **result}
 
 
-def run_opening_turn_stream(game_id: int, session: Session):
+def run_opening_turn_stream(game_id: int, session: Session, request_id: str | None = None):
+    existing = find_turn_by_request_id(game_id, request_id, session)
+    if existing:
+        yield {"type": "done", **saved_turn_result(existing)}
+        return
     if _has_turn_logs(game_id, session):
         yield {"type": "done", "skipped": True, "visible_story": "", "message": "当前存档已经有剧情记录，不重复生成开场白。"}
         return
@@ -531,7 +653,7 @@ def run_opening_turn_stream(game_id: int, session: Session):
     visible_story = "".join(chunks).strip() or "开场白生成失败：模型没有返回内容。"
 
     yield {"type": "status", "message": "正在保存开场状态..."}
-    result = _save_opening_turn(game_id, visible_story, snapshot_before_turn, context, session)
+    result = _save_opening_turn(game_id, visible_story, snapshot_before_turn, context, session, request_id=request_id)
 
     yield {"type": "done", "skipped": False, **result}
 
@@ -543,7 +665,11 @@ def run_game_turn(
     fast_mode: bool = False,
     skip_state_update: bool = False,
     async_state_update: bool = False,
+    request_id: str | None = None,
 ) -> dict:
+    existing = find_turn_by_request_id(game_id, request_id, session)
+    if existing:
+        return saved_turn_result(existing)
     context = attach_retrieved_memories(load_game_context(game_id, session), game_id, user_input, session)
     max_turn_number = session.exec(select(func.max(TurnLog.turn_number)).where(TurnLog.game_id == game_id)).one()
     turn_number = int(max_turn_number or 0) + 1
@@ -558,10 +684,15 @@ def run_game_turn(
     story = run_narrator_agent(context, user_input, protagonist_turn, npc_reactions)
     clean_story, parsed_hint = _split_visible_story_and_hint(story.get("visible_story", ""))
     visible_story = _compose_visible_story(protagonist_turn, clean_story)
+    output_quality = analyze_story_quality(
+        visible_story,
+        user_input=user_input,
+        recent_turns=context.get("recent_turns", []),
+    )
     should_async_update = async_state_update and not skip_state_update
     should_hint_update = skip_state_update or should_async_update
     if should_hint_update:
-        state_patch = _apply_state_hint(game_id, story.get("state_hint") or parsed_hint, session)
+        state_patch = _apply_state_hint(game_id, story.get("state_hint") or parsed_hint, session, commit=False)
         checker_result = _pending_checker_result() if should_async_update else _skipped_checker_result("极速模式已应用 Hint 软状态，跳过完整状态整理。")
         checker_result["state_hint_applied"] = bool(state_patch.get("updated_characters") or state_patch.get("current_state_update"))
         apply_result = (
@@ -579,6 +710,7 @@ def run_game_turn(
             session,
             skip_state_update=skip_state_update,
         )
+    checker_result = attach_quality_diagnostics(checker_result, output_quality)
 
     turn = save_turn_and_snapshot(
         game_id=game_id,
@@ -590,6 +722,7 @@ def run_game_turn(
         checker_result=checker_result,
         snapshot_before_turn=snapshot_before_turn,
         session=session,
+        client_request_id=request_id,
     )
     rag_memory = store_turn_memory(game_id, turn, visible_story, npc_reactions, state_patch, checker_result, session)
     if should_async_update:
@@ -607,6 +740,7 @@ def run_game_turn(
         "fast_mode": fast_mode,
         "skip_state_update": skip_state_update,
         "async_state_update": should_async_update,
+        "request_id": request_id or "",
     }
 
 
@@ -617,7 +751,12 @@ def run_game_turn_stream(
     fast_mode: bool = False,
     skip_state_update: bool = False,
     async_state_update: bool = False,
+    request_id: str | None = None,
 ):
+    existing = find_turn_by_request_id(game_id, request_id, session)
+    if existing:
+        yield {"type": "done", **saved_turn_result(existing)}
+        return
     yield {"type": "status", "message": "正在检索相关世界观和角色记忆..."}
     context = attach_retrieved_memories(load_game_context(game_id, session), game_id, user_input, session)
     max_turn_number = session.exec(select(func.max(TurnLog.turn_number)).where(TurnLog.game_id == game_id)).one()
@@ -661,6 +800,11 @@ def run_game_turn_stream(
     visible_story = "".join(chunks).strip() or "剧情生成失败：模型没有返回内容。"
     visible_story, fallback_hint = _split_visible_story_and_hint(visible_story)
     state_hint = hint_box.get("state_hint") or fallback_hint
+    output_quality = analyze_story_quality(
+        visible_story,
+        user_input=user_input,
+        recent_turns=context.get("recent_turns", []),
+    )
 
     should_async_update = async_state_update and not skip_state_update
     should_hint_update = skip_state_update or should_async_update
@@ -671,7 +815,7 @@ def run_game_turn_stream(
     else:
         yield {"type": "status", "message": "正在整理状态变化..."}
     if should_hint_update:
-        state_patch = _apply_state_hint(game_id, state_hint, session)
+        state_patch = _apply_state_hint(game_id, state_hint, session, commit=False)
         checker_result = _pending_checker_result() if should_async_update else _skipped_checker_result("极速模式已应用 Hint 软状态，跳过完整状态整理。")
         checker_result["state_hint_applied"] = bool(state_patch.get("updated_characters") or state_patch.get("current_state_update"))
         apply_result = (
@@ -689,6 +833,7 @@ def run_game_turn_stream(
             session,
             skip_state_update=skip_state_update,
         )
+    checker_result = attach_quality_diagnostics(checker_result, output_quality)
 
     turn = save_turn_and_snapshot(
         game_id=game_id,
@@ -700,6 +845,7 @@ def run_game_turn_stream(
         checker_result=checker_result,
         snapshot_before_turn=snapshot_before_turn,
         session=session,
+        client_request_id=request_id,
     )
     rag_memory = store_turn_memory(game_id, turn, visible_story, npc_reactions, state_patch, checker_result, session)
     if should_async_update:
@@ -718,4 +864,5 @@ def run_game_turn_stream(
         "fast_mode": fast_mode,
         "skip_state_update": skip_state_update,
         "async_state_update": should_async_update,
+        "request_id": request_id or "",
     }

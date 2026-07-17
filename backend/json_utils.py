@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from copy import deepcopy
 from typing import Any
 
@@ -43,14 +44,44 @@ def safe_json_loads(text: str, default: Any = None) -> Any:
         default = {}
     if not text:
         return deepcopy(default)
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        start = text.find("{")
-        end = text.rfind("}")
-        if start != -1 and end != -1 and end > start:
+    source = str(text).strip().lstrip("\ufeff")
+    fenced = re.sub(r"^```(?:json)?\s*|\s*```$", "", source, flags=re.IGNORECASE)
+    candidates = [source, fenced]
+    balanced = _first_balanced_object(fenced)
+    if balanced:
+        candidates.append(balanced)
+    for candidate in candidates:
+        for repaired in (candidate, re.sub(r",\s*([}\]])", r"\1", candidate)):
             try:
-                return json.loads(text[start : end + 1])
-            except json.JSONDecodeError:
-                pass
+                return json.loads(repaired)
+            except (TypeError, json.JSONDecodeError):
+                continue
     return deepcopy(default)
+
+
+def _first_balanced_object(text: str) -> str:
+    start = text.find("{")
+    if start < 0:
+        return ""
+    depth = 0
+    in_string = False
+    escaped = False
+    for index in range(start, len(text)):
+        char = text[index]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+        elif char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start : index + 1]
+    return ""

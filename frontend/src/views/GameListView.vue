@@ -1,17 +1,30 @@
 <template>
-  <section class="view-grid two">
+  <header class="page-hero save-library-hero">
+    <div>
+      <span class="eyebrow">MY STORY WORLDS</span>
+      <h1>我的故事存档</h1>
+      <p>从旧故事继续，或创建一个全新的世界。</p>
+    </div>
+    <div class="hero-stat">
+      <strong>{{ games.length }}</strong>
+      <span>个故事世界</span>
+    </div>
+  </header>
+  <section class="view-grid two game-library-grid">
     <div class="panel">
       <header class="panel-header">
-        <h1>存档</h1>
+        <div><h2>最近的故事</h2><p>网页端与 Android 端实时共享</p></div>
         <button type="button" class="icon-button" title="刷新" @click="load">
           <RefreshCw :size="17" />
         </button>
       </header>
       <div class="game-list">
         <article v-for="game in games" :key="game.id" class="game-row" :class="{ active: game.id === gameStore.currentGameId }">
-          <div>
+          <div class="game-cover" aria-hidden="true"><BookOpen :size="25" /></div>
+          <div class="game-row-copy">
+            <span v-if="game.id === gameStore.currentGameId" class="active-story-dot">当前</span>
             <h2>{{ game.title }}</h2>
-            <p>{{ game.genre || '未设置题材' }} · {{ game.world_type || '未设置世界类型' }}</p>
+            <p><span>{{ game.genre || '自由题材' }}</span><span>{{ game.world_type || '开放世界' }}</span></p>
           </div>
           <div class="button-row">
             <button type="button" class="primary" @click="enterGame(game)">
@@ -26,12 +39,17 @@
             </button>
           </div>
         </article>
+        <div v-if="!games.length && !ui.loading" class="resource-empty illustrated-empty">
+          <span class="empty-icon"><BookOpen :size="28" /></span>
+          <h3>还没有故事存档</h3>
+          <p>在右侧填写基础设定，创建属于你的第一个世界。</p>
+        </div>
       </div>
     </div>
 
-    <div class="panel">
+    <div class="panel create-story-panel">
       <header class="panel-header">
-        <h1>创建存档</h1>
+        <div><span class="eyebrow">NEW STORY</span><h2>创建新世界</h2><p>几个关键词就能开始冒险</p></div>
       </header>
       <form class="form-grid" @submit.prevent="submit">
         <label class="field">
@@ -48,9 +66,9 @@
         <label class="field"><span>叙事视角</span><input v-model="form.narrative_perspective" /></label>
         <label class="field wide"><span>文风规则</span><textarea v-model="form.style_guide" rows="4" /></label>
         <label class="field wide"><span>世界规则摘要</span><textarea v-model="form.rules_summary" rows="4" /></label>
-        <button type="submit" class="primary">
-          <Plus :size="17" />
-          创建存档
+        <button type="submit" class="primary create-story-button">
+          <Sparkles :size="17" />
+          创建并进入故事
         </button>
         <label class="file-button">
           <Upload :size="17" />
@@ -65,7 +83,7 @@
 <script setup>
 import { onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { Download, Play, Plus, RefreshCw, Trash2, Upload } from 'lucide-vue-next'
+import { BookOpen, Download, Play, RefreshCw, Sparkles, Trash2, Upload } from 'lucide-vue-next'
 import { createGame, deleteGame, exportGame, importGame, listGames } from '../api/games'
 import { listTemplates } from '../api/templates'
 import { useGameStore } from '../stores/gameStore'

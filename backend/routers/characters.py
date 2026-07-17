@@ -23,6 +23,25 @@ ALLOWED_AVATAR_TYPES = {
 }
 
 
+def _valid_image_signature(content_type: str, content: bytes) -> bool:
+    if content_type == "image/png":
+        return content.startswith(b"\x89PNG\r\n\x1a\n")
+    if content_type == "image/jpeg":
+        return content.startswith(b"\xff\xd8\xff")
+    if content_type == "image/webp":
+        return len(content) >= 12 and content.startswith(b"RIFF") and content[8:12] == b"WEBP"
+    return False
+
+
+def _delete_local_avatar(avatar_url: str) -> None:
+    prefix = "/uploads/characters/"
+    if not avatar_url.startswith(prefix):
+        return
+    candidate = (UPLOAD_DIR / avatar_url.removeprefix(prefix)).resolve()
+    if candidate.parent == UPLOAD_DIR.resolve():
+        candidate.unlink(missing_ok=True)
+
+
 @router.post("/games/{game_id}/characters")
 def create_character(game_id: int, payload: CharacterCreate, db: Session = Depends(get_session), user: User = Depends(get_current_user)):
     require_game_access(db, game_id, user)
@@ -53,7 +72,10 @@ def update_character(character_id: int, payload: CharacterUpdate, db: Session = 
 def delete_character(character_id: int, db: Session = Depends(get_session), user: User = Depends(get_current_user)):
     character = crud.get_or_404(db, Character, character_id, "角色")
     require_record_game_access(db, character, user)
-    return crud.delete_record(db, character)
+    avatar_url = character.avatar_url
+    result = crud.delete_record(db, character)
+    _delete_local_avatar(avatar_url)
+    return result
 
 
 @router.post("/characters/{character_id}/avatar")
@@ -69,7 +91,22 @@ async def upload_avatar(character_id: int, file: UploadFile = File(...), db: Ses
     content = await file.read(MAX_AVATAR_BYTES + 1)
     if len(content) > MAX_AVATAR_BYTES:
         raise HTTPException(status_code=413, detail="头像不能超过 2MB。")
+    if not _valid_image_signature(content_type, content):
+        raise HTTPException(status_code=400, detail="图片内容与声明的格式不一致。")
+    old_avatar_url = character.avatar_url
     target.write_bytes(content)
     avatar_url = f"/uploads/characters/{filename}"
     crud.update_record(db, character, {"avatar_url": avatar_url})
+    if old_avatar_url != avatar_url:
+        _delete_local_avatar(old_avatar_url)
     return {"avatar_url": avatar_url}
+
+
+@router.delete("/characters/{character_id}/avatar")
+def delete_avatar(character_id: int, db: Session = Depends(get_session), user: User = Depends(get_current_user)):
+    character = crud.get_or_404(db, Character, character_id, "角色")
+    require_record_game_access(db, character, user)
+    old_avatar_url = character.avatar_url
+    crud.update_record(db, character, {"avatar_url": ""})
+    _delete_local_avatar(old_avatar_url)
+    return {"avatar_url": ""}

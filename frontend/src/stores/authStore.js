@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { getMe, login, register } from '../api/auth'
+import { getMe, login, logoutSession, register } from '../api/auth'
 
 function readUser() {
   try {
@@ -23,6 +23,7 @@ export const useAuthStore = defineStore('auth', {
       this.token = session.token
       this.user = session.user
       localStorage.setItem('authToken', session.token)
+      if (session.refresh_token) localStorage.setItem('authRefreshToken', session.refresh_token)
       localStorage.setItem('authUser', JSON.stringify(session.user))
     },
     async login(payload) {
@@ -37,10 +38,16 @@ export const useAuthStore = defineStore('auth', {
       localStorage.setItem('authUser', JSON.stringify(this.user))
       return this.user
     },
-    logout() {
+    async logout() {
+      try {
+        if (this.token) await logoutSession(localStorage.getItem('authRefreshToken') || '')
+      } catch {
+        // Local logout must still succeed if the network is unavailable.
+      }
       this.token = ''
       this.user = null
       localStorage.removeItem('authToken')
+      localStorage.removeItem('authRefreshToken')
       localStorage.removeItem('authUser')
       localStorage.removeItem('currentGameId')
     }

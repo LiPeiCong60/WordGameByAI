@@ -1,10 +1,35 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 
 HIDDEN_CONTEXT_FIELDS = {"hidden_goal"}
+HIDDEN_TEXT_RE = re.compile(r"(?:^|[\n；;])\s*隐藏目标\s*[：:].*?(?=$|[\n；;])")
+
+CONTEXT_PRIORITY = (
+    "game",
+    "current_story_world",
+    "protagonist",
+    "retrieved_memories",
+    "recent_turns",
+    "npcs",
+    "characters",
+    "world_lore",
+    "templates",
+)
+
+CONTEXT_LIST_LIMITS = {
+    "retrieved_memories": 8,
+    "recent_turns": 6,
+    "npcs": 16,
+    "characters": 18,
+    "world_lore": 16,
+    "templates": 6,
+}
+
+TEMPLATE_CONTEXT_FIELDS = {"id", "name", "genre", "world_type", "tone", "description"}
 
 
 def _redact_hidden_fields(value: Any) -> Any:
@@ -16,15 +41,58 @@ def _redact_hidden_fields(value: Any) -> Any:
         }
     if isinstance(value, list):
         return [_redact_hidden_fields(item) for item in value]
+    if isinstance(value, str):
+        return HIDDEN_TEXT_RE.sub("", value).strip()
     return value
+
+
+def _compact_value(value: Any, *, string_limit: int = 1800) -> Any:
+    if isinstance(value, dict):
+        return {key: _compact_value(item, string_limit=string_limit) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_compact_value(item, string_limit=string_limit) for item in value]
+    if isinstance(value, str) and len(value) > string_limit:
+        return value[: string_limit - 16] + "...[TRUNCATED]"
+    return value
+
+
+def _section_value(key: str, value: Any, *, string_limit: int = 1800) -> Any:
+    if key == "templates" and isinstance(value, list):
+        value = [
+            {field: item.get(field) for field in TEMPLATE_CONTEXT_FIELDS if field in item}
+            for item in value
+            if isinstance(item, dict)
+        ]
+    if isinstance(value, list):
+        value = value[: CONTEXT_LIST_LIMITS.get(key, len(value))]
+    return _compact_value(value, string_limit=string_limit)
 
 
 def compact_context(context: dict[str, Any], max_chars: int = 16000, redact_hidden: bool = False) -> str:
     payload = _redact_hidden_fields(context) if redact_hidden else context
-    text = json.dumps(payload, ensure_ascii=False, default=str)
-    if len(text) <= max_chars:
-        return text
-    return text[:max_chars] + "...[TRUNCATED]"
+    compacted: dict[str, Any] = {}
+    keys = [*CONTEXT_PRIORITY, *(key for key in payload if key not in CONTEXT_PRIORITY)]
+    omitted: list[str] = []
+    for key in keys:
+        if key not in payload:
+            continue
+        added = False
+        for string_limit in (1800, 900, 450, 200):
+            candidate = {**compacted, key: _section_value(key, payload[key], string_limit=string_limit)}
+            text = json.dumps(candidate, ensure_ascii=False, default=str)
+            if len(text) <= max_chars:
+                compacted = candidate
+                added = True
+                break
+        if not added:
+            omitted.append(key)
+    if omitted:
+        candidate = {**compacted, "context_omitted_sections": omitted}
+        if len(json.dumps(candidate, ensure_ascii=False, default=str)) <= max_chars:
+            compacted = candidate
+    # Always return valid JSON. The old implementation sliced the serialized
+    # string mid-object, causing models to receive malformed context.
+    return json.dumps(compacted, ensure_ascii=False, default=str)
 
 
 def untrusted_block(label: str, value: str) -> str:
@@ -55,6 +123,15 @@ NARRATIVE_FORMAT_RULES = (
     "8. 不要使用项目符号、Markdown、解释文字或格式说明。"
     "9. 严禁输出任何既不带括号 []/()，又不带角色名冒号前缀的裸露文本段落。所有环境背景和行动描写都必须用 [] 包裹，所有心理独白和细节思考都必须用 () 包裹。"
     "10. 台词正文内部应尽量避免使用冒号 : 或 ：，如果有停顿，建议使用逗号、破折号 `——` 或分号代替，以防与说话人前缀混淆。"
+    "11. 每个动作、心理或对白段之间必须使用两个换行符分隔。严禁把段落粘成 `][`、`]角色名：`、`)角色名：` 或 `角色甲：……角色乙：……`；每个角色的每一句话都必须单独成段。"
+)
+
+STORY_QUALITY_RULES = (
+    "剧情质量优先级高于辞藻堆砌：必须对玩家本轮的行动或台词产生明确、因果相关的反馈。"
+    "每轮至少推进一个有效变化，例如新信息、关系变化、场景变化、阻力、选择压力或目标进展；不能只复述玩家输入。"
+    "严格避免重复上一轮已经出现的句子、动作、情绪结论和无意义寒暄。"
+    "NPC 的反应必须来自其性格、目标、位置和已知信息，不能为了迎合玩家突然改变立场。"
+    "正文应自然连贯、具体可感，并在结尾保留一个可继续行动的空间，但不要输出菜单式选项。"
 )
 
 STATE_HINT_INSTRUCTIONS = (
@@ -177,6 +254,7 @@ def build_narrator_messages(
             "role": "system",
             "content": (
                 "你是一个长篇 AI 文字 RPG 游戏主持人。必须保持世界观连续、角色性格稳定、文风和叙事视角一致。"
+                f"{STORY_QUALITY_RULES}"
                 f"{RELATION_METRIC_RULES}"
                 "如果游戏上下文包含 retrieved_memories，它们是本轮检索到的相关长期记忆和世界观，必须用于保持剧情连续，不能与其冲突。"
                 "角色 hidden_goal 或其他隐藏暗线只能作为行为倾向参考，严禁在 visible_story 中直接揭示、复述或解释。"
@@ -216,6 +294,7 @@ def build_narrator_stream_messages(
             "role": "system",
             "content": (
                 "你是一个长篇 AI 文字 RPG 游戏主持人。必须保持世界观连续、角色性格稳定、文风和叙事视角一致。"
+                f"{STORY_QUALITY_RULES}"
                 f"{RELATION_METRIC_RULES}"
                 "如果游戏上下文包含 retrieved_memories，它们是本轮检索到的相关长期记忆和世界观，必须用于保持剧情连续，不能与其冲突。"
                 "角色 hidden_goal 或其他隐藏暗线只能作为行为倾向参考，严禁在玩家可见正文中直接揭示、复述或解释。"
@@ -250,6 +329,7 @@ def build_opening_messages(context: dict[str, Any]) -> list[dict[str, str]]:
             "role": "system",
             "content": (
                 "你是 NarrativeAgent 的开场主持人。你只负责为一个还没有任何剧情回合的新存档生成开场白。"
+                f"{STORY_QUALITY_RULES}"
                 "如果游戏上下文包含 retrieved_memories，它们是本轮检索到的相关世界观、角色记忆和历史剧情，应作为开场连续性的参考。"
                 "必须结合当前存档的 title、genre、world_type、tone、style_guide、rules_summary，以及 templates 中最匹配的模板。"
                 "模板匹配优先级：模板 name/genre/world_type 与当前存档 genre/world_type/title 相符；如果没有完全匹配，就使用最接近的题材规则。"
@@ -275,6 +355,7 @@ def build_opening_stream_messages(context: dict[str, Any]) -> list[dict[str, str
             "role": "system",
             "content": (
                 "你是 NarrativeAgent 的开场主持人。你只负责为一个还没有任何剧情回合的新存档生成开场白。"
+                f"{STORY_QUALITY_RULES}"
                 "如果游戏上下文包含 retrieved_memories，它们是本轮检索到的相关世界观、角色记忆和历史剧情，应作为开场连续性的参考。"
                 "必须结合当前存档的 title、genre、world_type、tone、style_guide、rules_summary，以及 templates 中最匹配的模板。"
                 "模板匹配优先级：模板 name/genre/world_type 与当前存档 genre/world_type/title 相符；如果没有完全匹配，就使用最接近的题材规则。"

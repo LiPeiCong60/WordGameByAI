@@ -19,16 +19,10 @@
                   <p v-for="(line, lineIndex) in segment.lines" :key="`role-${index}-${lineIndex}`">{{ line }}</p>
                 </div>
               </div>
-              <div class="message-avatar">
-                <img v-if="avatarForSpeaker(segment.speaker)" :src="avatarForSpeaker(segment.speaker)" :alt="segment.speaker" />
-                <span v-else>{{ avatarInitial(segment.speaker) }}</span>
-              </div>
+              <CharacterAvatar class="message-avatar" :character="avatarCharacterForSpeaker(segment.speaker)" :size="38" shape="rounded" />
             </template>
             <template v-else>
-              <div class="message-avatar">
-                <img v-if="avatarForSpeaker(segment.speaker)" :src="avatarForSpeaker(segment.speaker)" :alt="segment.speaker" />
-                <span v-else>{{ avatarInitial(segment.speaker) }}</span>
-              </div>
+              <CharacterAvatar class="message-avatar" :character="avatarCharacterForSpeaker(segment.speaker)" :size="38" shape="rounded" />
               <div class="message-stack">
                 <span class="message-name">{{ segment.speaker }}</span>
                 <div class="role-bubble">
@@ -87,16 +81,10 @@
                   <p v-for="(line, lineIndex) in segment.lines" :key="`latest-role-${lineIndex}`">{{ line }}</p>
                 </div>
               </div>
-              <div class="message-avatar">
-                <img v-if="avatarForSpeaker(segment.speaker)" :src="avatarForSpeaker(segment.speaker)" :alt="segment.speaker" />
-                <span v-else>{{ avatarInitial(segment.speaker) }}</span>
-              </div>
+              <CharacterAvatar class="message-avatar" :character="avatarCharacterForSpeaker(segment.speaker)" :size="38" shape="rounded" />
             </template>
             <template v-else>
-              <div class="message-avatar">
-                <img v-if="avatarForSpeaker(segment.speaker)" :src="avatarForSpeaker(segment.speaker)" :alt="segment.speaker" />
-                <span v-else>{{ avatarInitial(segment.speaker) }}</span>
-              </div>
+              <CharacterAvatar class="message-avatar" :character="avatarCharacterForSpeaker(segment.speaker)" :size="38" shape="rounded" />
               <div class="message-stack">
                 <span class="message-name">{{ segment.speaker }}</span>
                 <div class="role-bubble">
@@ -120,6 +108,7 @@
 <script setup>
 import { computed, nextTick, ref, watch } from 'vue'
 import { Pencil, RotateCcw } from 'lucide-vue-next'
+import CharacterAvatar from './CharacterAvatar.vue'
 
 const props = defineProps({
   entries: { type: Array, default: () => [] },
@@ -132,7 +121,6 @@ const props = defineProps({
 
 defineEmits(['delete-from', 'regenerate'])
 
-const apiBase = (import.meta.env.VITE_API_ORIGIN || 'http://localhost:8000').replace(/\/api$/, '')
 const logRef = ref(null)
 
 const characterNames = computed(() =>
@@ -202,6 +190,17 @@ function storySegments(text) {
 }
 
 function splitDialogueAndNarration(speaker, content) {
+  const transitionIndex = findKnownSpeakerTransition(content)
+  if (transitionIndex > 0) {
+    const currentContent = content.slice(0, transitionIndex).trim()
+    const nextContent = content.slice(transitionIndex).trim()
+    const nextSegments = splitParagraphBySpeaker(nextContent)
+    return [
+      ...(currentContent ? splitDialogueAndNarration(speaker, currentContent) : []),
+      ...(nextSegments || [{ type: 'narration', lines: [nextContent] }])
+    ]
+  }
+
   const regex = /(\[[^\]]*\]|【[^】]*】|（[^）]*）|\([^)]*\)|\[[^\]]*$|【[^】]*$|（[^）]*$|\([^)]*$)/g
   const parts = content.split(regex)
   const result = []
@@ -219,6 +218,22 @@ function splitDialogueAndNarration(speaker, content) {
     }
   }
   return result
+}
+
+function findKnownSpeakerTransition(content) {
+  const names = [...new Set([props.protagonistName, '你', ...characterNames.value].filter(Boolean))]
+  let winner = -1
+  for (const name of names) {
+    const escaped = String(name).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const expression = new RegExp(`${escaped}(?:\\s*[（(][^）)]*[）)])?\\s*[：:]`, 'gu')
+    for (const match of content.matchAll(expression)) {
+      if (match.index == null || match.index <= 0) continue
+      const previous = content[match.index - 1]
+      if (!/[。！？!?；;\]】）)\s]/u.test(previous)) continue
+      if (winner < 0 || match.index < winner) winner = match.index
+    }
+  }
+  return winner
 }
 
 function isOutsideBrackets(text) {
@@ -310,14 +325,13 @@ function characterForSpeaker(speaker) {
     props.characters.find((item) => item?.role_type === 'protagonist' && isProtagonistSpeaker(speaker))
 }
 
-function avatarForSpeaker(speaker) {
-  const avatarUrl = characterForSpeaker(speaker)?.avatar_url
-  if (!avatarUrl) return ''
-  return avatarUrl.startsWith('http') ? avatarUrl : `${apiBase}${avatarUrl}`
-}
-
-function avatarInitial(speaker) {
-  return String(speaker || '你').trim().slice(0, 1) || '你'
+function avatarCharacterForSpeaker(speaker) {
+  const character = characterForSpeaker(speaker)
+  if (character) return character
+  return {
+    name: speaker === '你' ? props.protagonistName : speaker,
+    role_type: isProtagonistSpeaker(speaker) ? 'protagonist' : 'npc'
+  }
 }
 
 function isProtagonistSpeaker(speaker) {

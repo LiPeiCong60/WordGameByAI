@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime
-
 from fastapi import HTTPException
 from sqlalchemy import or_
 from sqlmodel import Session, select
@@ -21,6 +19,7 @@ from models import (
     WorldTemplate,
     User,
 )
+from time_utils import utc_now
 
 ACTION_WHITELIST = {
     "update_game",
@@ -302,8 +301,14 @@ def _apply_create(db: Session, model, game_id: int, action: dict, user: User | N
     fields.pop("id", None)
     if model is WorldTemplate:
         is_public = bool(fields.pop("is_public", False)) if user and user.is_admin else False
-        return crud.create_record(db, model, fields, extra={"owner_user_id": None if is_public else getattr(user, "id", None)})
-    return crud.create_record(db, model, fields, extra={"game_id": game_id})
+        return crud.create_record(
+            db,
+            model,
+            fields,
+            extra={"owner_user_id": None if is_public else getattr(user, "id", None)},
+            commit=False,
+        )
+    return crud.create_record(db, model, fields, extra={"game_id": game_id}, commit=False)
 
 
 def _apply_update(db: Session, model, game_id: int, action: dict, user: User | None = None):
@@ -317,7 +322,7 @@ def _apply_update(db: Session, model, game_id: int, action: dict, user: User | N
         is_public = fields.pop("is_public", None)
         if user and user.is_admin and is_public is not None:
             target.owner_user_id = None if is_public else user.id
-    return crud.update_record(db, target, fields)
+    return crud.update_record(db, target, fields, commit=False)
 
 
 def _apply_delete(db: Session, model, game_id: int, action: dict, user: User | None = None):
@@ -326,7 +331,7 @@ def _apply_delete(db: Session, model, game_id: int, action: dict, user: User | N
         raise HTTPException(status_code=404, detail="找不到要删除的目标。")
     if model is WorldTemplate:
         _ensure_template_write_access(target, user)
-    return crud.delete_record(db, target)
+    return crud.delete_record(db, target, commit=False)
 
 
 def apply_management_proposal(proposal_id: int, db: Session, user: User | None = None) -> dict:
@@ -342,57 +347,60 @@ def apply_management_proposal(proposal_id: int, db: Session, user: User | None =
         if proposal.status in {"draft", "failed"} and actions:
             proposal.status = "pending_confirmation"
             proposal.proposed_actions = dump_json_field(actions)
-            proposal.updated_at = datetime.utcnow()
+            proposal.updated_at = utc_now()
             db.add(proposal)
             db.commit()
         else:
             raise HTTPException(status_code=400, detail="ManagementProposal 未处于待确认状态，不能执行。")
     results = []
     try:
-        for action in actions:
-            ok, reason = validate_management_action(action, db)
-            if not ok:
-                raise HTTPException(status_code=400, detail=reason)
-            name = action["action"]
-            if proposal.game_id == 0 and not name.endswith("_template"):
-                raise HTTPException(status_code=400, detail="全局模板会话只能修改模板。")
-            if name == "update_game":
-                game = db.get(Game, proposal.game_id)
-                if not game:
-                    raise HTTPException(status_code=404, detail="找不到游戏。")
-                fields = _clean_fields(Game, action.get("fields", {}))
-                if fields.get("current_story_world_id"):
-                    world = db.get(StoryWorld, fields["current_story_world_id"])
-                    if not world or world.game_id != proposal.game_id:
-                        raise HTTPException(status_code=400, detail="当前世界不属于该存档。")
-                results.append(crud.update_record(db, game, fields))
-            elif name.startswith("create_"):
-                key = name.removeprefix("create_")
-                model = MODEL_BY_ACTION.get(key)
-                if not model:
-                    raise HTTPException(status_code=400, detail=f"暂不支持创建 action: {name}")
-                results.append(_apply_create(db, model, proposal.game_id, action, user))
-            elif name.startswith("update_"):
-                key = name.removeprefix("update_")
-                model = MODEL_BY_ACTION.get(key)
-                if not model:
-                    raise HTTPException(status_code=400, detail=f"暂不支持更新 action: {name}")
-                results.append(_apply_update(db, model, proposal.game_id, action, user))
-            elif name.startswith("delete_"):
-                key = name.removeprefix("delete_")
-                model = MODEL_BY_ACTION.get(key)
-                if not model:
-                    raise HTTPException(status_code=400, detail=f"暂不支持删除 action: {name}")
-                results.append(_apply_delete(db, model, proposal.game_id, action, user))
-        proposal.status = "applied"
-        proposal.applied_at = datetime.utcnow()
-        proposal.updated_at = datetime.utcnow()
-        db.add(proposal)
+        with db.begin_nested():
+            for action in actions:
+                ok, reason = validate_management_action(action, db)
+                if not ok:
+                    raise HTTPException(status_code=400, detail=reason)
+                name = action["action"]
+                if proposal.game_id == 0 and not name.endswith("_template"):
+                    raise HTTPException(status_code=400, detail="全局模板会话只能修改模板。")
+                if name == "update_game":
+                    game = db.get(Game, proposal.game_id)
+                    if not game:
+                        raise HTTPException(status_code=404, detail="找不到游戏。")
+                    fields = _clean_fields(Game, action.get("fields", {}))
+                    if fields.get("current_story_world_id"):
+                        world = db.get(StoryWorld, fields["current_story_world_id"])
+                        if not world or world.game_id != proposal.game_id:
+                            raise HTTPException(status_code=400, detail="当前世界不属于该存档。")
+                    results.append(crud.update_record(db, game, fields, commit=False))
+                elif name.startswith("create_"):
+                    key = name.removeprefix("create_")
+                    model = MODEL_BY_ACTION.get(key)
+                    if not model:
+                        raise HTTPException(status_code=400, detail=f"暂不支持创建 action: {name}")
+                    results.append(_apply_create(db, model, proposal.game_id, action, user))
+                elif name.startswith("update_"):
+                    key = name.removeprefix("update_")
+                    model = MODEL_BY_ACTION.get(key)
+                    if not model:
+                        raise HTTPException(status_code=400, detail=f"暂不支持更新 action: {name}")
+                    results.append(_apply_update(db, model, proposal.game_id, action, user))
+                elif name.startswith("delete_"):
+                    key = name.removeprefix("delete_")
+                    model = MODEL_BY_ACTION.get(key)
+                    if not model:
+                        raise HTTPException(status_code=400, detail=f"暂不支持删除 action: {name}")
+                    results.append(_apply_delete(db, model, proposal.game_id, action, user))
+            proposal.status = "applied"
+            proposal.applied_at = utc_now()
+            proposal.updated_at = utc_now()
+            db.add(proposal)
         db.commit()
         return {"ok": True, "status": proposal.status, "results": [str(getattr(item, "id", item)) for item in results]}
     except HTTPException:
+        db.rollback()
+        proposal = db.get(ManagementProposal, proposal_id)
         proposal.status = "failed"
-        proposal.updated_at = datetime.utcnow()
+        proposal.updated_at = utc_now()
         db.add(proposal)
         db.commit()
         raise
@@ -403,7 +411,7 @@ def reject_management_proposal(proposal_id: int, db: Session) -> dict:
     if not proposal:
         raise HTTPException(status_code=404, detail=f"找不到修改方案: {proposal_id}")
     proposal.status = "rejected"
-    proposal.updated_at = datetime.utcnow()
+    proposal.updated_at = utc_now()
     db.add(proposal)
     db.commit()
     return {"ok": True, "status": proposal.status}

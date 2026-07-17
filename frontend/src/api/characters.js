@@ -5,3 +5,4 @@ export const createCharacter = (gameId, data) => apiPost(`/games/${gameId}/chara
 export const updateCharacter = (id, data) => apiPatch(`/characters/${id}`, data)
 export const deleteCharacter = (id) => apiDelete(`/characters/${id}`)
 export const uploadAvatar = (id, file) => uploadFile(`/characters/${id}/avatar`, file)
+export const deleteAvatar = (id) => apiDelete(`/characters/${id}/avatar`)

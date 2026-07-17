@@ -148,11 +148,16 @@ def regenerate_turn(
     db: Session,
     game_id: int | None = None,
     turn_number: int | None = None,
+    request_id: str | None = None,
 ) -> dict:
     turn = _get_turn(db, turn_id, game_id=game_id, turn_number=turn_number)
     user_input = turn.user_input
     rollback_result = delete_turns_from(turn.id, db)
-    result = run_game_turn(turn.game_id, user_input, db) if user_input else run_opening_turn(turn.game_id, db)
+    result = (
+        run_game_turn(turn.game_id, user_input, db, request_id=request_id)
+        if user_input
+        else run_opening_turn(turn.game_id, db, request_id=request_id)
+    )
     return {
         "ok": True,
         "rollback": rollback_result,

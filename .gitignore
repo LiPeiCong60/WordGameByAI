@@ -7,6 +7,8 @@ backend/.env.*
 !backend/.env.example
 backend/model_configs.json
 backend/model_configs.json.tmp
+backend/model_configs.json.lock
+backend/model_configs.json.bak*
 frontend/.env
 frontend/.env.*
 !frontend/.env.example
@@ -16,11 +18,16 @@ frontend/.env.*
 *.pfx
 *.crt
 *.token
+*.jks
+*.keystore
 
 # Local databases and private saves
 *.db
+*.db-*
 *.sqlite
+*.sqlite-*
 *.sqlite3
+*.sqlite3-*
 backend/narrative_agent.db
 
 # User uploads and generated media
@@ -37,12 +44,23 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
 
 # Frontend
 frontend/node_modules/
 frontend/dist/
 node_modules/
 dist/
+
+# Mobile service configuration and signing/provisioning material
+mobile/**/google-services.json
+mobile/**/GoogleService-Info.plist
+mobile/**/ExportOptions.plist
+*.mobileprovision
+*.provisionprofile
 
 # Logs and OS/editor files
 *.log

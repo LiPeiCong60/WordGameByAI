@@ -1,12 +1,13 @@
 import { createRouter, createWebHistory } from 'vue-router'
-import GameListView from '../views/GameListView.vue'
-import GamePlayView from '../views/GamePlayView.vue'
-import AdminView from '../views/AdminView.vue'
-import LoginView from '../views/LoginView.vue'
-import TemplateView from '../views/TemplateView.vue'
-import ManagementView from '../views/ManagementView.vue'
-import RegisterView from '../views/RegisterView.vue'
 import { useAuthStore } from '../stores/authStore'
+
+const GameListView = () => import('../views/GameListView.vue')
+const GamePlayView = () => import('../views/GamePlayView.vue')
+const AdminView = () => import('../views/AdminView.vue')
+const LoginView = () => import('../views/LoginView.vue')
+const TemplateView = () => import('../views/TemplateView.vue')
+const ManagementView = () => import('../views/ManagementView.vue')
+const RegisterView = () => import('../views/RegisterView.vue')
 
 const routes = [
   { path: '/', redirect: '/management' },

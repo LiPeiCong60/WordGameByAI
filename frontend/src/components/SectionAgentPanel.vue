@@ -1,7 +1,7 @@
 <template>
   <section class="panel management-panel section-agent">
     <header class="panel-header">
-      <h2>{{ title }}</h2>
+      <div class="agent-heading"><span class="agent-mark"><Bot :size="20" /></span><div><h2>{{ title }}</h2><small>World Game AI 助手</small></div></div>
       <button type="button" class="icon-button" title="新建对话" @click="createSession">
         <Plus :size="17" />
       </button>
@@ -45,7 +45,7 @@
       <article v-if="pending" class="chat-message chat-message--assistant">
         <div class="chat-bubble">
           <header class="chat-meta"><span>智能体</span></header>
-          <p>正在整理回复...</p>
+          <p class="typing-indicator"><i></i><i></i><i></i><span>正在整理回复</span></p>
         </div>
       </article>
     </div>
@@ -61,7 +61,7 @@
 
 <script setup>
 import { onMounted, ref, watch } from 'vue'
-import { Check, Plus, Send, X } from 'lucide-vue-next'
+import { Bot, Check, Plus, Send, X } from 'lucide-vue-next'
 import { applyProposal, createManagementSession, listManagementSessions, rejectProposal, sendManagementMessage } from '../api/management'
 import { useGameStore } from '../stores/gameStore'
 import { useUiStore } from '../stores/uiStore'

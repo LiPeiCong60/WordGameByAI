@@ -1,0 +1,28 @@
+name: word_game_by_ai
+description: Flutter client for WordGameByAI.
+publish_to: none
+version: 0.4.0+4
+
+environment:
+  sdk: ">=3.4.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+  dio: ^5.8.0+1
+  flutter_secure_storage: ^9.2.4
+  flutter_svg: ^2.0.17
+  uuid: ^4.5.1
+  file_picker: 10.3.10
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/avatars/
+    - assets/brand/

@@ -1,17 +1,16 @@
 from __future__ import annotations
 
-from datetime import datetime
-
 from sqlmodel import Session, select
 
 from json_utils import dump_json_field, merge_json_field, parse_json_field
 from models import Character, Game, StoryWorld
 from numeric_utils import as_int
+from time_utils import utc_now
 
 
 def _touch(record) -> None:
     if hasattr(record, "updated_at"):
-        record.updated_at = datetime.utcnow()
+        record.updated_at = utc_now()
 
 
 AMBIENT_NAME_MARKERS = ("一群", "路人", "群众", "人群", "军人们", "士兵们", "猎户们", "守卫们", "店员们", "围观者")
@@ -74,7 +73,7 @@ def _find_character(db: Session, game_id: int, name: str | None = None, characte
     return db.exec(select(Character).where(Character.game_id == game_id, Character.name == name)).first()
 
 
-def apply_state_patch(game_id: int, state_patch: dict, db: Session) -> dict:
+def apply_state_patch(game_id: int, state_patch: dict, db: Session, *, commit: bool = True) -> dict:
     warnings: list[str] = []
     game = db.get(Game, game_id)
     if not game:
@@ -196,5 +195,8 @@ def apply_state_patch(game_id: int, state_patch: dict, db: Session) -> dict:
         else:
             warnings.append("找不到 StoryWorld，未应用 updated_story_world。")
 
-    db.commit()
+    if commit:
+        db.commit()
+    else:
+        db.flush()
     return {"ok": True, "warnings": warnings}

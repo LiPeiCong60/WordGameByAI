@@ -3,12 +3,13 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import Column, Text
+from sqlalchemy import Column, Text, UniqueConstraint
 from sqlmodel import Field, SQLModel
+from time_utils import utc_now
 
 
 def now_utc() -> datetime:
-    return datetime.utcnow()
+    return utc_now()
 
 
 class TimestampMixin(SQLModel):
@@ -31,6 +32,8 @@ class Game(TimestampMixin, table=True):
 
 
 class User(TimestampMixin, table=True):
+    __table_args__ = (UniqueConstraint("username", name="uq_user_username"),)
+
     id: Optional[int] = Field(default=None, primary_key=True)
     username: str = Field(index=True, max_length=80)
     email: str = Field(default="", index=True, max_length=200)
@@ -43,12 +46,16 @@ class User(TimestampMixin, table=True):
 
 
 class AuthToken(SQLModel, table=True):
+    __table_args__ = (UniqueConstraint("token_hash", name="uq_auth_token_hash"),)
+
     id: Optional[int] = Field(default=None, primary_key=True)
     user_id: int = Field(index=True)
     token_hash: str = Field(index=True, max_length=128)
     created_at: datetime = Field(default_factory=now_utc)
     expires_at: datetime = Field(index=True)
     revoked: bool = False
+    kind: str = Field(default="access", index=True, max_length=20)
+    last_used_at: Optional[datetime] = None
 
 
 class CaptchaChallenge(SQLModel, table=True):
@@ -60,11 +67,23 @@ class CaptchaChallenge(SQLModel, table=True):
 
 
 class MessageUsage(SQLModel, table=True):
+    __table_args__ = (UniqueConstraint("user_id", "usage_date", name="uq_message_usage_user_date"),)
+
     id: Optional[int] = Field(default=None, primary_key=True)
     user_id: int = Field(index=True)
     usage_date: str = Field(index=True, max_length=20)
     message_count: int = 0
     updated_at: datetime = Field(default_factory=now_utc)
+
+
+class MessageRateBucket(SQLModel, table=True):
+    __table_args__ = (UniqueConstraint("user_id", "window_start", name="uq_message_rate_user_window"),)
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: int = Field(index=True)
+    window_start: str = Field(index=True, max_length=40)
+    request_count: int = 0
+    expires_at: datetime = Field(index=True)
 
 
 class TokenUsageLog(SQLModel, table=True):
@@ -155,6 +174,11 @@ class RagMemory(TimestampMixin, table=True):
 
 
 class TurnLog(SQLModel, table=True):
+    __table_args__ = (
+        UniqueConstraint("game_id", "turn_number", name="uq_turn_log_game_number"),
+        UniqueConstraint("game_id", "client_request_id", name="uq_turn_log_game_request"),
+    )
+
     id: Optional[int] = Field(default=None, primary_key=True)
     game_id: int = Field(index=True)
     turn_number: int
@@ -163,7 +187,28 @@ class TurnLog(SQLModel, table=True):
     npc_reactions: str = Field(default="{}", sa_column=Column(Text))
     state_patch: str = Field(default="{}", sa_column=Column(Text))
     checker_result: str = Field(default="{}", sa_column=Column(Text))
+    client_request_id: Optional[str] = Field(default=None, index=True, max_length=100)
     created_at: datetime = Field(default_factory=now_utc)
+
+
+class GameTurnLease(SQLModel, table=True):
+    game_id: int = Field(primary_key=True)
+    request_id: str = Field(index=True, max_length=100)
+    expires_at: datetime = Field(index=True)
+    created_at: datetime = Field(default_factory=now_utc)
+
+
+class TurnStateJob(TimestampMixin, table=True):
+    __table_args__ = (UniqueConstraint("turn_id", name="uq_turn_state_job_turn"),)
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    game_id: int = Field(index=True)
+    turn_id: int = Field(index=True)
+    owner_user_id: Optional[int] = Field(default=None, index=True)
+    status: str = Field(default="pending", index=True, max_length=30)
+    attempts: int = 0
+    payload_json: str = Field(default="{}", sa_column=Column(Text(length=16777215)))
+    last_error: str = Field(default="", sa_column=Column(Text))
 
 
 class TurnSnapshot(SQLModel, table=True):

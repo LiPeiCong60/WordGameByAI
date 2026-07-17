@@ -2,11 +2,47 @@ from __future__ import annotations
 
 import json
 import os
+import threading
+from contextlib import contextmanager
+from functools import wraps
 from pathlib import Path
 from typing import Any
 
 BASE_DIR = Path(__file__).resolve().parent
 CONFIG_PATH = Path(os.getenv("MODEL_CONFIG_FILE", str(BASE_DIR / "model_configs.json")))
+CONFIG_WRITE_LOCK = threading.RLock()
+
+
+@contextmanager
+def _config_write_lock():
+    with CONFIG_WRITE_LOCK:
+        CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        lock_path = CONFIG_PATH.with_suffix(f"{CONFIG_PATH.suffix}.lock")
+        with lock_path.open("a+", encoding="utf-8") as lock_file:
+            try:
+                import fcntl
+
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+            except (ImportError, OSError):
+                pass
+            try:
+                yield
+            finally:
+                try:
+                    import fcntl
+
+                    fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+                except (ImportError, OSError):
+                    pass
+
+
+def _serialized_config_write(fn):
+    @wraps(fn)
+    def wrapped(*args, **kwargs):
+        with _config_write_lock():
+            return fn(*args, **kwargs)
+
+    return wrapped
 
 AGENT_NAMES = [
     "ProtagonistAgent",
@@ -136,6 +172,7 @@ def user_level_id(user_id: int | None) -> str:
     return str((_read_config().get("user_levels") or {}).get(str(user_id)) or "")
 
 
+@_serialized_config_write
 def upsert_model(payload: dict[str, Any]) -> dict:
     model_id = _validate_config_id(str(payload.get("id") or ""), "模型")
     data = _read_config()
@@ -159,6 +196,7 @@ def upsert_model(payload: dict[str, Any]) -> dict:
     return _model_payload(model_id, model)
 
 
+@_serialized_config_write
 def delete_model(model_id: str) -> dict:
     data = _read_config()
     if model_id not in data["models"]:
@@ -175,6 +213,7 @@ def delete_model(model_id: str) -> dict:
     return {"ok": True}
 
 
+@_serialized_config_write
 def upsert_level(payload: dict[str, Any]) -> dict:
     level_id = _validate_config_id(str(payload.get("id") or ""), "模型等级")
     data = _read_config()
@@ -206,6 +245,7 @@ def upsert_level(payload: dict[str, Any]) -> dict:
     return _level_payload(level_id, level)
 
 
+@_serialized_config_write
 def delete_level(level_id: str) -> dict:
     data = _read_config()
     if level_id not in data["levels"]:
@@ -218,6 +258,7 @@ def delete_level(level_id: str) -> dict:
     return {"ok": True}
 
 
+@_serialized_config_write
 def set_default_level(level_id: str | None) -> dict:
     data = _read_config()
     level_id = level_id or ""
@@ -228,6 +269,7 @@ def set_default_level(level_id: str | None) -> dict:
     return public_model_config()
 
 
+@_serialized_config_write
 def set_default_model(model_id: str | None) -> dict:
     data = _read_config()
     model_id = model_id or ""
@@ -238,6 +280,7 @@ def set_default_model(model_id: str | None) -> dict:
     return public_model_config()
 
 
+@_serialized_config_write
 def set_user_level(user_id: int, level_id: str | None) -> dict:
     data = _read_config()
     key = str(user_id)

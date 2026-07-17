@@ -1,21 +1,23 @@
 from __future__ import annotations
 
 import os
-import threading
-from collections import defaultdict, deque
 from datetime import date, datetime, timedelta
 
 from fastapi import HTTPException
+from sqlalchemy import update
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
-from models import MessageUsage, User
+from models import MessageRateBucket, MessageUsage, User
+from time_utils import utc_from_timestamp, utc_now
 
 DEFAULT_NON_MEMBER_DAILY_LIMIT = int(os.getenv("NON_MEMBER_DAILY_MESSAGE_LIMIT", "20"))
 RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("MESSAGE_RATE_LIMIT_WINDOW_SECONDS", "60"))
 RATE_LIMIT_MAX_REQUESTS = int(os.getenv("MESSAGE_RATE_LIMIT_MAX_REQUESTS", "10"))
 
-_rate_lock = threading.Lock()
-_recent_requests: dict[int, deque[datetime]] = defaultdict(deque)
+# Kept as a compatibility shim for older tests/callers. Rate limits are now
+# persisted in the database and therefore work across multiple workers.
+_recent_requests: dict = {}
 
 
 def effective_daily_message_limit(user: User) -> int | None:
@@ -39,22 +41,51 @@ def get_today_message_usage(db: Session, user: User) -> dict:
     }
 
 
-def _check_short_window(user: User) -> None:
+def _get_or_create_rate_bucket(db: Session, user_id: int, window_start: str, expires_at: datetime) -> None:
+    bucket = db.exec(
+        select(MessageRateBucket)
+        .where(MessageRateBucket.user_id == user_id, MessageRateBucket.window_start == window_start)
+        .with_for_update()
+    ).first()
+    if bucket:
+        return
+    try:
+        bucket = MessageRateBucket(user_id=user_id, window_start=window_start, expires_at=expires_at)
+        db.add(bucket)
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+    db.exec(
+        select(MessageRateBucket)
+        .where(MessageRateBucket.user_id == user_id, MessageRateBucket.window_start == window_start)
+    ).one()
+
+
+def _check_short_window(db: Session, user: User) -> None:
     if user.is_admin:
         return
-    now = datetime.utcnow()
-    cutoff = now - timedelta(seconds=RATE_LIMIT_WINDOW_SECONDS)
-    with _rate_lock:
-        bucket = _recent_requests[int(user.id or 0)]
-        while bucket and bucket[0] < cutoff:
-            bucket.popleft()
-        if len(bucket) >= RATE_LIMIT_MAX_REQUESTS:
-            raise HTTPException(status_code=429, detail=f"请求过于频繁，请稍后再试。")
-        bucket.append(now)
+    now = utc_now()
+    window_epoch = int(now.timestamp()) // max(1, RATE_LIMIT_WINDOW_SECONDS) * max(1, RATE_LIMIT_WINDOW_SECONDS)
+    window_start = utc_from_timestamp(window_epoch).isoformat()
+    expires_at = utc_from_timestamp(window_epoch) + timedelta(seconds=RATE_LIMIT_WINDOW_SECONDS * 2)
+    user_id = int(user.id or 0)
+    _get_or_create_rate_bucket(db, user_id, window_start, expires_at)
+    result = db.exec(
+        update(MessageRateBucket)
+        .where(
+            MessageRateBucket.user_id == user_id,
+            MessageRateBucket.window_start == window_start,
+            MessageRateBucket.request_count < RATE_LIMIT_MAX_REQUESTS,
+        )
+        .values(request_count=MessageRateBucket.request_count + 1)
+    )
+    db.commit()
+    if not result.rowcount:
+        raise HTTPException(status_code=429, detail="请求过于频繁，请稍后再试。")
 
 
 def require_message_quota(db: Session, user: User) -> dict:
-    _check_short_window(user)
+    _check_short_window(db, user)
     limit = effective_daily_message_limit(user)
     if limit is None:
         return {"ok": True, "limit": None, "remaining": None}
@@ -62,12 +93,23 @@ def require_message_quota(db: Session, user: User) -> dict:
     today = date.today().isoformat()
     usage = db.exec(select(MessageUsage).where(MessageUsage.user_id == user.id, MessageUsage.usage_date == today)).first()
     if not usage:
-        usage = MessageUsage(user_id=int(user.id), usage_date=today, message_count=0)
-    if usage.message_count >= limit:
-        raise HTTPException(status_code=429, detail=f"今日消息额度已用完（{usage.message_count}/{limit}）。")
-
-    usage.message_count += 1
-    usage.updated_at = datetime.utcnow()
-    db.add(usage)
+        try:
+            usage = MessageUsage(user_id=int(user.id), usage_date=today, message_count=0)
+            db.add(usage)
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+        usage = db.exec(select(MessageUsage).where(MessageUsage.user_id == user.id, MessageUsage.usage_date == today)).one()
+    result = db.exec(
+        update(MessageUsage)
+        .where(
+            MessageUsage.id == usage.id,
+            MessageUsage.message_count < limit,
+        )
+        .values(message_count=MessageUsage.message_count + 1, updated_at=utc_now())
+    )
     db.commit()
+    db.refresh(usage)
+    if not result.rowcount:
+        raise HTTPException(status_code=429, detail=f"今日消息额度已用完（{usage.message_count}/{limit}）。")
     return {"ok": True, "limit": limit, "remaining": max(limit - usage.message_count, 0)}

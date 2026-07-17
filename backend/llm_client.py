@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from contextvars import ContextVar
 from typing import Any, Iterator
@@ -13,6 +14,17 @@ from model_config_service import resolve_model_config
 load_dotenv()
 
 CURRENT_LLM_USER_ID: ContextVar[int | None] = ContextVar("CURRENT_LLM_USER_ID", default=None)
+logger = logging.getLogger(__name__)
+STRUCTURED_AGENTS = {
+    "ProtagonistAgent",
+    "NPCReactionAgent",
+    "PatchAgent",
+    "CheckerAgent",
+    "LoreAgent",
+    "ManagementAgent",
+    "OpeningAgent",
+    "NarratorAgent",
+}
 
 
 def set_current_llm_user(user_id: int | None):
@@ -28,7 +40,10 @@ def current_llm_user_id() -> int | None:
 
 
 def _llm_config(agent_name: str | None = None, user_id: int | None = None) -> dict:
-    return resolve_model_config(agent_name=agent_name, user_id=user_id if user_id is not None else current_llm_user_id())
+    config = resolve_model_config(agent_name=agent_name, user_id=user_id if user_id is not None else current_llm_user_id())
+    if agent_name in STRUCTURED_AGENTS:
+        config = {**config, "temperature": min(float(config.get("temperature", 0.7)), 0.3)}
+    return config
 
 
 def _api_key(config: dict) -> str | None:
@@ -48,6 +63,7 @@ def _chat_model(config: dict, api_key: str, timeout: float | None, streaming: bo
         base_url=(config.get("base_url") or "https://api.openai.com/v1").rstrip("/"),
         temperature=float(config.get("temperature", 0.7)),
         timeout=timeout,
+        max_retries=2,
         model_kwargs=model_kwargs,
     )
 
@@ -99,6 +115,12 @@ def call_llm(
         
         return content
     except Exception as exc:
+        logger.warning(
+            "LLM request failed agent=%s model=%s error=%s",
+            agent_name or "unknown",
+            config.get("model") or "unknown",
+            type(exc).__name__,
+        )
         return json.dumps({"error": "LLM request failed."}, ensure_ascii=False)
 
 
@@ -148,6 +170,12 @@ def call_llm_stream(
         _log_token_usage(actual_user_id, model_name, final_prompt_tokens, final_completion_tokens)
         
     except Exception as exc:
+        logger.warning(
+            "LLM stream failed agent=%s model=%s error=%s",
+            agent_name or "unknown",
+            config.get("model") or "unknown",
+            type(exc).__name__,
+        )
         yield "无法生成剧情：模型服务暂时不可用。"
 
 

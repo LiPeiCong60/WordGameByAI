@@ -1,19 +1,23 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import math
+import os
 import re
 from collections import Counter
-from datetime import datetime
 from typing import Any
 
 from sqlmodel import Session, select
 
 from json_utils import dump_json_field, parse_json_field
 from models import Character, Game, RagMemory, TurnLog, WorldLore
+from time_utils import utc_now
 
 VECTOR_SIZE = 256
+VECTOR_VERSION = 2
 MAX_MEMORY_CONTENT = 900
+MAX_RAG_CANDIDATES = max(100, int(os.getenv("MAX_RAG_CANDIDATES", "1000")))
 
 
 def _model_dump(record) -> dict:
@@ -40,7 +44,11 @@ def _tokens(text: str) -> list[str]:
 def _vectorize(text: str) -> dict[str, float]:
     counts: Counter[int] = Counter()
     for token in _tokens(text):
-        counts[hash(token) % VECTOR_SIZE] += 1
+        # Python's built-in hash is randomized for every process. Persisted
+        # vectors must use a stable digest so restarts and multiple workers
+        # produce the same buckets.
+        digest = hashlib.blake2b(token.encode("utf-8"), digest_size=8, person=b"wordgame").digest()
+        counts[int.from_bytes(digest, "big") % VECTOR_SIZE] += 1
     norm = math.sqrt(sum(value * value for value in counts.values()))
     if not norm:
         return {}
@@ -81,13 +89,28 @@ def _upsert_memory(
     memory = db.exec(query).first()
     if not memory:
         memory = RagMemory(game_id=game_id, source_type=source_type, source_id=source_id)
+    old_extra = parse_json_field(memory.extra_attrs, default={}) if memory.id else {}
+    if not isinstance(old_extra, dict):
+        old_extra = {}
+    next_extra = {**old_extra, **(extra_attrs or {}), "vector_version": VECTOR_VERSION}
+    next_importance = max(1, min(10, int(importance or 5)))
+    vector_stale = old_extra.get("vector_version") != VECTOR_VERSION
+    content_changed = any(
+        [
+            memory.title != title,
+            memory.content != content,
+            memory.tags != tags,
+            memory.importance != next_importance,
+        ]
+    )
     memory.title = title
     memory.content = content
     memory.tags = tags
-    memory.importance = max(1, min(10, int(importance or 5)))
-    memory.embedding_json = dump_json_field(_vectorize(_memory_text(title, content, tags)))
-    memory.extra_attrs = dump_json_field(extra_attrs or {})
-    memory.updated_at = datetime.utcnow()
+    memory.importance = next_importance
+    if content_changed or vector_stale or not memory.embedding_json:
+        memory.embedding_json = dump_json_field(_vectorize(_memory_text(title, content, tags)))
+        memory.updated_at = utc_now()
+    memory.extra_attrs = dump_json_field(next_extra)
     db.add(memory)
     return memory
 
@@ -119,7 +142,6 @@ def sync_rag_memories(game_id: int, db: Session) -> dict[str, int]:
             f"信任度:{character.trust_score}",
             f"张力:{character.tension_score}",
             f"当前目标:{character.current_goal}",
-            f"隐藏目标:{character.hidden_goal}",
             f"长期记忆:{character.memory_summary}",
         ]
         tags = ",".join(filter(None, ["character", character.role_type, character.name]))
@@ -133,10 +155,26 @@ def sync_rag_memories(game_id: int, db: Session) -> dict[str, int]:
 def retrieve_related_memories(game_id: int, query: str, db: Session, top_k: int = 6) -> list[dict[str, Any]]:
     sync_rag_memories(game_id, db)
     query_vector = _vectorize(query)
-    memories = db.exec(select(RagMemory).where(RagMemory.game_id == game_id)).all()
+    memories = db.exec(
+        select(RagMemory)
+        .where(RagMemory.game_id == game_id)
+        .order_by(RagMemory.importance.desc(), RagMemory.updated_at.desc())
+        .limit(MAX_RAG_CANDIDATES)
+    ).all()
+    repaired_vectors = False
     scored: list[tuple[float, RagMemory]] = []
     query_terms = set(_tokens(query))
     for memory in memories:
+        extra = parse_json_field(memory.extra_attrs, default={})
+        if not isinstance(extra, dict):
+            extra = {}
+        if extra.get("vector_version") != VECTOR_VERSION:
+            memory.embedding_json = dump_json_field(
+                _vectorize(_memory_text(memory.title, memory.content, memory.tags))
+            )
+            memory.extra_attrs = dump_json_field({**extra, "vector_version": VECTOR_VERSION})
+            db.add(memory)
+            repaired_vectors = True
         vector = parse_json_field(memory.embedding_json, default={})
         if not isinstance(vector, dict):
             vector = {}
@@ -147,6 +185,8 @@ def retrieve_related_memories(game_id: int, query: str, db: Session, top_k: int 
         if score > 0:
             scored.append((score, memory))
     scored.sort(key=lambda item: item[0], reverse=True)
+    if repaired_vectors:
+        db.commit()
     return [
         {
             **_model_dump(memory),
