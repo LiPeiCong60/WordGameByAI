@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 
 import '../../core/network/api_client.dart';
-import '../../core/ui/record_form_page.dart';
 import '../management/game_agent_page.dart';
+import 'template_character_codec.dart';
+import 'template_editor_page.dart';
 
 class TemplatesPage extends StatefulWidget {
   const TemplatesPage({super.key, required this.api, required this.user});
@@ -16,19 +17,6 @@ class _TemplatesPageState extends State<TemplatesPage> {
   List<dynamic> _items = [];
   bool _loading = true;
   String _error = '';
-  List<RecordField> get _fields => [
-        const RecordField('name', '名称', required: true),
-        const RecordField('genre', '题材'),
-        const RecordField('world_type', '世界类型'),
-        const RecordField('tone', '基调'),
-        if (widget.user['is_admin'] == true)
-          const RecordField('is_public', '公开模板', type: RecordFieldType.boolean),
-        const RecordField('description', '模板描述', lines: 3),
-        const RecordField('default_style_guide', '默认文风', lines: 5),
-        const RecordField('default_rules', '默认世界规则', lines: 5),
-        const RecordField('default_character_fields', '开局角色设计 JSON',
-            lines: 12, helper: '支持 characters 数组，可定义主角和 NPC 的全部字段。'),
-      ];
   @override
   void initState() {
     super.initState();
@@ -55,6 +43,36 @@ class _TemplatesPageState extends State<TemplatesPage> {
   bool _canEdit(Map<String, dynamic> item) =>
       widget.user['is_admin'] == true ||
       item['owner_user_id'] == widget.user['id'];
+
+  Future<void> _openAgent([Map<String, dynamic>? template]) async {
+    await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => GameAgentPage(
+          api: widget.api,
+          gameId: 0,
+          templateContext: template == null
+              ? null
+              : {
+                  'current_template_id': template['id'],
+                  for (final key in const [
+                    'name',
+                    'genre',
+                    'world_type',
+                    'tone',
+                    'description',
+                    'default_style_guide',
+                    'default_rules',
+                    'default_character_fields',
+                  ])
+                    key: template[key],
+                },
+        ),
+      ),
+    );
+    if (mounted) await _load();
+  }
+
   Future<void> _edit([Map<String, dynamic>? source]) async {
     final editable = source == null || _canEdit(source);
     final item = source == null
@@ -68,17 +86,20 @@ class _TemplatesPageState extends State<TemplatesPage> {
                 'is_public': false
               };
     final initial = item == null
-        ? const <String, dynamic>{
-            'default_character_fields': '{\n  "characters": []\n}'
+        ? <String, dynamic>{
+            'default_character_fields': TemplateCharacterCodec.encode([
+              TemplateCharacterCodec.blank('protagonist'),
+              TemplateCharacterCodec.blank('npc'),
+            ]),
           }
         : {...item, 'is_public': item['owner_user_id'] == null};
     final changed = await Navigator.push<bool>(
         context,
         MaterialPageRoute(
-            builder: (_) => RecordFormPage(
+            builder: (_) => TemplateEditorPage(
                 title: item?['id'] == null ? '新增模板' : '编辑模板',
-                fields: _fields,
                 initial: initial,
+                isAdmin: widget.user['is_admin'] == true,
                 onSave: (data) async {
                   if (item?['id'] == null) {
                     await widget.api.postJson('/templates', data);
@@ -125,11 +146,7 @@ class _TemplatesPageState extends State<TemplatesPage> {
   Widget build(BuildContext context) => Scaffold(
         appBar: AppBar(title: const Text('世界模板'), actions: [
           IconButton(
-              onPressed: () => Navigator.push<void>(
-                  context,
-                  MaterialPageRoute(
-                      builder: (_) =>
-                          GameAgentPage(api: widget.api, gameId: 0))),
+              onPressed: () => _openAgent(),
               tooltip: '模板智能助手',
               icon: const Icon(Icons.smart_toy_outlined)),
           IconButton(onPressed: _load, icon: const Icon(Icons.refresh))
@@ -160,6 +177,7 @@ class _TemplatesPageState extends State<TemplatesPage> {
                               trailing: PopupMenuButton<String>(
                                   onSelected: (v) {
                                     if (v == 'edit') _edit(item);
+                                    if (v == 'agent') _openAgent(item);
                                     if (v == 'delete') _delete(item);
                                   },
                                   itemBuilder: (_) => [
@@ -167,6 +185,10 @@ class _TemplatesPageState extends State<TemplatesPage> {
                                             value: 'edit',
                                             child:
                                                 Text(own ? '编辑' : '复制为我的模板')),
+                                        if (own)
+                                          const PopupMenuItem(
+                                              value: 'agent',
+                                              child: Text('AI 优化模板')),
                                         if (own)
                                           const PopupMenuItem(
                                               value: 'delete',

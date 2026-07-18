@@ -10,8 +10,8 @@
 
 <p align="center">
   <img alt="Development" src="https://img.shields.io/badge/status-development-2f7df4">
-  <img alt="Android 0.4.0+4" src="https://img.shields.io/badge/Android-0.4.0%2B4-34a853">
-  <img alt="Tests 66" src="https://img.shields.io/badge/tests-66%20declared-20b486">
+  <img alt="Android 0.5.0+5" src="https://img.shields.io/badge/Android-0.5.0%2B5-34a853">
+  <img alt="Tests 79" src="https://img.shields.io/badge/tests-79%20passing-20b486">
   <img alt="License" src="https://img.shields.io/badge/license-all%20rights%20reserved-lightgrey">
 </p>
 
@@ -34,13 +34,13 @@ World Game by AI（仓库名 `WordGameByAI`）是一套完整开发版的 AI 互
 
 ### Android 安装包
 
-**[直接下载 World Game by AI Android v0.4.0+4 测试 APK](https://github.com/LiPeiCong60/WordGameByAI/raw/refs/tags/v0.4.0/releases/WorldGameByAI-android-v0.4.0-build4.apk)**（约 59 MiB）
+**[直接下载 World Game by AI Android v0.5.0+5 测试 APK](https://github.com/LiPeiCong60/WordGameByAI/raw/refs/tags/v0.5.0/releases/WorldGameByAI-android-v0.5.0-build5.apk)**（约 59 MiB）
 
 ```text
-SHA-256  4bf0607353d0e758a076b39a6a58448365f12ba1cf818ad0dadb8fe5d83197ad
+SHA-256  d4ce63f0f3bb5158546fb971380cbfcd831369e76fecea466af99149e6db71ac
 ```
 
-该 APK 已在 Android 模拟器完成登录、模板建档、AI 开场、剧情对话和角色头像验证。它仍使用测试签名并连接当前测试服务，仅用于安装体验；正式分发前必须改用 HTTPS、唯一包名和私有 release keystore。校验清单见 [`releases/SHA256SUMS.txt`](releases/SHA256SUMS.txt)。
+该 APK 增加了可恢复上下文的模板智能助手，以及不暴露 JSON 的结构化开局角色编辑器。它仍使用测试签名并连接当前测试服务，仅用于安装体验；正式分发前必须改用 HTTPS、唯一包名和私有 release keystore。校验清单见 [`releases/SHA256SUMS.txt`](releases/SHA256SUMS.txt)。
 
 ## 界面预览
 
@@ -75,6 +75,8 @@ SHA-256  4bf0607353d0e758a076b39a6a58448365f12ba1cf818ad0dadb8fe5d83197ad
 - **真正的流式剧情**：后端返回 NDJSON，Web 与 Android 均可边生成边展示。
 - **对白结构化展示**：把旁白、动作、心理和角色台词解析为不同 UI，而不是把模型全文塞进一个文本框。
 - **AI 写入有边界**：管理 Agent 先给出提案，只有用户确认后才执行；服务端再用 action 与字段白名单校验。
+- **模板助手真正连续对话**：服务端恢复同一会话最近历史，“自动生成”“按刚才的做”等后续表达能继承上文；明确需求会直接生成完整待确认方案。
+- **模板角色使用结构化表单**：Android 可逐个添加、编辑和删除主角/NPC，内部兼容历史 JSON，界面不再要求用户手写 JSON。
 - **移动端可靠网络层**：安全令牌存储、401 自动刷新、请求幂等、分页与状态同步均已实现。
 - **默认头像智能匹配**：没有上传图片时，根据姓名、性别、年龄、身份、外貌、性格和角色类型稳定匹配头像。
 
@@ -86,6 +88,7 @@ SHA-256  4bf0607353d0e758a076b39a6a58448365f12ba1cf818ad0dadb8fe5d83197ad
 | 存档创建、编辑、删除 | ✅ | ✅ | ✅ |
 | 存档 JSON 导入 / 导出 | ✅ | ✅ | ✅ |
 | 公共与私人世界模板 | ✅ | ✅ | ✅ |
+| 模板助手历史恢复与开局角色表单 | ✅ | ✅ | ✅ |
 | 世界 / 副本 CRUD 与当前世界切换 | ✅ | ✅ | ✅ |
 | 世界观 CRUD 与 LoreAgent 整理 | ✅ | ✅ | ✅ |
 | 完整角色卡 CRUD | ✅ | ✅ | ✅ |
@@ -284,7 +287,7 @@ flutter build apk --release \
   --dart-define=API_BASE_URL=https://your-domain.example/api/v1
 ```
 
-Android 令牌通过 Keychain/Keystore 安全存储；遇到 401 会自动轮换刷新令牌并重试。当前 `0.4.0+4` APK 仍属于测试发行版：应用 ID 是 `com.example.word_game_by_ai`，release 构建仍使用开发签名，且开发 Manifest 为兼容临时 IP 服务允许 HTTP。提交应用商店前必须改为唯一包名、正式私有签名和 HTTPS，并禁止 release 明文流量。
+Android 令牌通过 Keychain/Keystore 安全存储；遇到 401 会自动轮换刷新令牌并重试。当前 `0.5.0+5` APK 仍属于测试发行版：应用 ID 是 `com.example.word_game_by_ai`，release 构建仍使用开发签名，且开发 Manifest 为兼容临时 IP 服务允许 HTTP。提交应用商店前必须改为唯一包名、正式私有签名和 HTTPS，并禁止 release 明文流量。
 
 更多说明见 [mobile/README.md](mobile/README.md)。
 
@@ -302,25 +305,26 @@ GET /api/v1/mobile/config
 GET /api/v1/games/{id}/bootstrap
 GET /api/v1/games/{id}/turns
 GET /api/v1/games/{id}/state-sync
+GET /api/v1/management/sessions/{id}/messages
 ```
 
 接口特性包括 NDJSON 流式剧情、`request_id` / `X-Request-ID` 幂等、单存档生成租约、游标分页、短窗限流、每日额度、存档归属校验和管理员权限。完整的 60 多个路由及请求模型请以运行时 Swagger `/docs` 为准。
 
 ## 测试与质量
 
-当前源码声明 66 项自动化测试：
+当前源码通过 79 项自动化测试：
 
 | 测试层 | 数量 | 重点 |
 | --- | ---: | --- |
-| Python 后端 | 46 | 认证、权限、RAG、并发租约、事务、Prompt 脱敏、JSON 容错、额度、头像 |
-| Flutter | 15 | API 错误、剧情拆分、表单、网络层、默认头像 |
+| Python 后端 | 51 | 认证、权限、RAG、管理会话上下文、模板生成、并发租约、事务、Prompt 脱敏、JSON 容错、额度、头像 |
+| Flutter | 23 | API 错误、剧情拆分、模板助手、结构化模板角色表单、网络层、默认头像 |
 | Vue / Node | 5 | 默认头像资源与标签匹配 |
 
 运行命令：
 
 ```bash
 # 后端
-python -m pytest -q
+python -m unittest discover -s tests -v
 
 # Web
 cd frontend && npm test && npm run build
@@ -329,7 +333,7 @@ cd frontend && npm test && npm run build
 cd mobile && flutter analyze && flutter test
 ```
 
-前端目前只有头像工具测试，尚未建立组件测试与 E2E；“66 项”是源码中的测试声明数，不等同于完整生产验收。
+网页端目前只有头像工具测试，尚未建立组件测试与 E2E；“79 项通过”不等同于完整生产验收。
 
 ## 安全与隐私
 

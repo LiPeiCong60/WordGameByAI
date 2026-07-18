@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import desc
 from sqlmodel import Session, select
 
 import crud
@@ -11,6 +12,7 @@ from message_quota_service import require_message_quota
 from management_service import (
     apply_management_proposal,
     create_management_session,
+    list_management_messages,
     reject_management_proposal,
     run_management_chat,
 )
@@ -46,8 +48,13 @@ def create_session(game_id: int, payload: ManagementSessionCreate, db: Session =
 def list_sessions(game_id: int, db: Session = Depends(get_session), user: User = Depends(get_current_user)):
     require_management_access(game_id, user, db)
     if game_id == 0:
-        return list(db.exec(select(ManagementSession).where(ManagementSession.game_id == 0, ManagementSession.owner_user_id == user.id)).all())
-    return crud.list_by_game(db, ManagementSession, game_id)
+        query = select(ManagementSession).where(
+            ManagementSession.game_id == 0,
+            ManagementSession.owner_user_id == user.id,
+        )
+    else:
+        query = select(ManagementSession).where(ManagementSession.game_id == game_id)
+    return list(db.exec(query.order_by(desc(ManagementSession.updated_at), desc(ManagementSession.id))).all())
 
 
 @router.get("/management/sessions/{session_id}")
@@ -55,6 +62,13 @@ def get_session_record(session_id: int, db: Session = Depends(get_session), user
     session = crud.get_or_404(db, ManagementSession, session_id, "管理会话")
     require_management_record_access(session, user, db)
     return session
+
+
+@router.get("/management/sessions/{session_id}/messages")
+def get_session_messages(session_id: int, db: Session = Depends(get_session), user: User = Depends(get_current_user)):
+    session = crud.get_or_404(db, ManagementSession, session_id, "管理会话")
+    require_management_record_access(session, user, db)
+    return list_management_messages(db, session_id)
 
 
 @router.post("/management/sessions/{session_id}/chat")

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from fastapi import HTTPException
-from sqlalchemy import or_
+from sqlalchemy import desc, or_
 from sqlmodel import Session, select
 
 import crud
@@ -45,6 +45,8 @@ MODEL_BY_ACTION = {
 }
 
 ACTION_CONTROL_FIELDS = {"id", "target_id", "target_name"}
+MANAGEMENT_HISTORY_LIMIT = 12
+MANAGEMENT_HISTORY_MAX_CHARS = 24000
 
 ALLOWED_FIELDS = {
     Game: {"title", "genre", "world_type", "tone", "narrative_perspective", "style_guide", "rules_summary", "current_state", "current_story_world_id"},
@@ -195,12 +197,148 @@ def create_management_proposal(
     return proposal
 
 
+def _trim_history_text(value, limit: int) -> str:
+    text = str(value or "").strip()
+    if len(text) <= limit:
+        return text
+    return text[: limit - 16] + "...[TRUNCATED]"
+
+
+def _compact_history_actions(value) -> list[dict]:
+    actions = _normalize_management_actions(value)
+    if len(dump_json_field(actions)) <= 8000:
+        return actions
+    summaries: list[dict] = []
+    for action in actions[:12]:
+        fields = action.get("fields") if isinstance(action.get("fields"), dict) else {}
+        summaries.append(
+            {
+                "action": action.get("action"),
+                "target_id": action.get("target_id") or action.get("id"),
+                "target_name": action.get("target_name"),
+                "fields": {
+                    key: fields.get(key)
+                    for key in ("name", "title", "genre", "world_type", "tone")
+                    if key in fields
+                },
+                "details_truncated": True,
+            }
+        )
+    return summaries
+
+
+def load_management_history(
+    db: Session,
+    session_id: int,
+    *,
+    limit: int = MANAGEMENT_HISTORY_LIMIT,
+    max_chars: int = MANAGEMENT_HISTORY_MAX_CHARS,
+) -> list[dict]:
+    rows = list(
+        db.exec(
+            select(ManagementProposal)
+            .where(ManagementProposal.session_id == session_id)
+            .order_by(desc(ManagementProposal.id))
+            .limit(max(1, min(limit, 50)))
+        ).all()
+    )
+    selected: list[dict] = []
+    used = 0
+    for row in rows:
+        entry = {
+            "proposal_id": row.id,
+            "user_request": _trim_history_text(row.user_request, 5000),
+            "agent_response": _trim_history_text(row.agent_response, 7000),
+            "proposed_actions": _compact_history_actions(row.proposed_actions),
+            "status": row.status,
+        }
+        cost = len(dump_json_field(entry))
+        if selected and used + cost > max_chars:
+            break
+        selected.append(entry)
+        used += cost
+    return list(reversed(selected))
+
+
+def list_management_messages(db: Session, session_id: int, *, limit: int = 50) -> list[dict]:
+    rows = list(
+        db.exec(
+            select(ManagementProposal)
+            .where(ManagementProposal.session_id == session_id)
+            .order_by(desc(ManagementProposal.id))
+            .limit(max(1, min(limit, 100)))
+        ).all()
+    )
+    result: list[dict] = []
+    for row in reversed(rows):
+        actions = _normalize_management_actions(row.proposed_actions)
+        display_request = row.user_request
+        if "【用户请求】" in display_request:
+            display_request = display_request.split("【用户请求】", 1)[1].strip()
+        result.append(
+            {
+                "proposal_id": row.id,
+                "user_request": display_request,
+                "agent_response": row.agent_response,
+                "proposed_actions": actions,
+                "status": row.status,
+                "requires_confirmation": row.status == "pending_confirmation" and bool(actions),
+                "created_at": row.created_at,
+                "updated_at": row.updated_at,
+            }
+        )
+    return result
+
+
+_TEMPLATE_OPERATION_RE = re.compile(
+    r"(?:生成|创建|新建|设计|制作|修改|更新|优化|调整|补全|删除).{0,20}模板|模板.{0,20}(?:生成|创建|新建|设计|制作|修改|更新|优化|调整|补全|删除)"
+)
+_TEMPLATE_AUTONOMY_RE = re.compile(r"自动(?:生成|完成|补全)?|你(?:来)?决定|按(?:刚才|上面|之前)|直接(?:生成|做)|就这样|开始吧|生成吧")
+_TEMPLATE_EDIT_RE = re.compile(r"修改|更新|优化|调整|补全|完善|改成|变得|更.{0,12}(?:一些|一点|明显|强|弱)")
+
+
+def _template_action_expected(message: str, scope: str, history: list[dict]) -> bool:
+    if scope != "模板":
+        return False
+    user_text = message.split("【用户请求】", 1)[-1].strip()
+    if _TEMPLATE_OPERATION_RE.search(user_text):
+        return True
+    if _extract_current_template_id(message) and _TEMPLATE_EDIT_RE.search(user_text):
+        return True
+    if not _TEMPLATE_AUTONOMY_RE.search(user_text):
+        return False
+    return any(
+        "模板" in str(turn.get("user_request") or "")
+        for turn in history
+    )
+
+
 def run_management_chat(session_id: int, message: str, db: Session, scope: str = "", user: User | None = None) -> dict:
     session_record = db.get(ManagementSession, session_id)
     if not session_record:
         raise HTTPException(status_code=404, detail=f"找不到管理会话: {session_id}")
     context = _load_global_template_context(db, user) if session_record.game_id == 0 else load_game_context(session_record.game_id, db)
-    result = run_management_agent(context, message, scope)
+    history = load_management_history(db, session_id)
+    result = run_management_agent(context, message, scope, history=history)
+    initial_actions = _normalize_management_actions(result.get("proposed_actions", []))
+    has_usable_template_action = any(
+        action.get("action") in {"create_template", "update_template", "delete_template"}
+        for action in initial_actions
+    )
+    if (
+        not has_usable_template_action
+        and not result.get("error")
+        and _template_action_expected(message, scope, history)
+    ):
+        retry = run_management_agent(
+            context,
+            message,
+            scope,
+            history=history,
+            force_action=True,
+        )
+        if not retry.get("error"):
+            result = retry
     current_template_id = _extract_current_template_id(message)
     actions = [
         _with_context_target(_normalize_action(action), current_template_id)
@@ -215,6 +353,9 @@ def run_management_chat(session_id: int, message: str, db: Session, scope: str =
         actions,
         db,
     )
+    session_record.updated_at = utc_now()
+    db.add(session_record)
+    db.commit()
     return {
         "reply": result.get("reply", ""),
         "proposal_id": proposal.id,

@@ -5,9 +5,22 @@ from llm_client import call_llm
 from prompt_builder import build_management_messages
 
 
-def run_management_agent(context: dict, message: str, scope: str = "") -> dict:
+def run_management_agent(
+    context: dict,
+    message: str,
+    scope: str = "",
+    history: list[dict] | None = None,
+    *,
+    force_action: bool = False,
+) -> dict:
     raw = call_llm(
-        build_management_messages(context, message, scope),
+        build_management_messages(
+            context,
+            message,
+            scope,
+            history=history,
+            force_action=force_action,
+        ),
         response_format={"type": "json_object"},
         agent_name="ManagementAgent",
     )
